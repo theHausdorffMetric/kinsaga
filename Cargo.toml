@@ -1,0 +1,20 @@
+[package]
+name = "kinsaga"
+version = "0.1.0"
+edition = "2024"
+authors = ["Daniel Probst <daniel@probst.dev>"]
+description = "A family chronicle library for managing timestamped, categorized life events"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/probstd/kinsaga"
+keywords = ["family", "chronicle", "genealogy", "timeline", "history"]
+categories = ["data-structures", "parser-implementations"]
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
