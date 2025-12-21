@@ -8,8 +8,37 @@
 //! - **Categorized** into customizable life themes
 //! - **Person-centric** - each family member has their own timeline
 //!
-//! ## Status
+//! ## Example
 //!
-//! This crate is under active development. See the repository for progress.
+//! ```rust
+//! use kinsaga::model::{Chronicle, Person, Fact, Category};
+//!
+//! let mut chronicle = Chronicle::new("1.0");
+//! chronicle.title = Some("Family Chronicle".into());
+//!
+//! chronicle.categories.push(
+//!     Category::new("family", "Family & Friends").with_color("#E57373")
+//! );
+//!
+//! let mut person = Person::new("alice", "Alice Smith");
+//! person.facts.push(Fact::new(
+//!     "uuid-1",
+//!     "1990-05-15",
+//!     "family",
+//!     "Born in Springfield",
+//! ));
+//! chronicle.persons.push(person);
+//!
+//! let json = serde_json::to_string_pretty(&chronicle).unwrap();
+//! println!("{}", json);
+//! ```
 
-#![doc = include_str!("../README.md")]
+pub mod date;
+pub mod filter;
+pub mod io;
+pub mod model;
+
+pub use date::ChronicleDate;
+pub use filter::{search, FactFilter, SearchResult};
+pub use io::{load, save};
+pub use model::{Category, Chronicle, Fact, Person};
