@@ -12,6 +12,10 @@ pub struct Chronicle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
+    /// Last updated timestamp (ISO 8601 UTC, e.g., "2025-12-26T14:30:00Z")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated: Option<String>,
+
     /// Available categories for facts
     pub categories: Vec<Category>,
 
@@ -73,6 +77,7 @@ impl Chronicle {
         Self {
             version: version.into(),
             title: None,
+            last_updated: None,
             categories: Vec::new(),
             persons: Vec::new(),
         }

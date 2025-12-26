@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
-use kinsaga::filter::{filter_facts, sort_facts_by_date, FactFilter};
+use kinsaga::filter::{filter_facts, FactFilter};
 use kinsaga::{load, save, search, Chronicle, ChronicleDate, Fact};
 use log::{error, warn};
 use std::collections::{HashMap, HashSet};
@@ -45,7 +45,7 @@ enum Commands {
     },
 
     /// Show timeline for a person
-    Show {
+    Timeline {
         /// Person ID to show
         person: String,
 
@@ -64,6 +64,10 @@ enum Commands {
         /// Filter to year (inclusive)
         #[arg(long)]
         to: Option<u16>,
+
+        /// Include facts from other persons where this person is in their 'with' field
+        #[arg(long)]
+        include_shared: bool,
     },
 
     /// Search for text across all persons
@@ -107,6 +111,10 @@ enum Commands {
         /// Preview only, don't save to file
         #[arg(long)]
         dry_run: bool,
+
+        /// Also create the fact for each person in --with (with cross-references)
+        #[arg(long)]
+        propagate: bool,
     },
 }
 
@@ -126,13 +134,14 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::List { format } => cmd_list(&input, &format),
-        Commands::Show {
+        Commands::Timeline {
             person,
             format,
             category,
             from,
             to,
-        } => cmd_show(&input, &person, &format, category, from, to),
+            include_shared,
+        } => cmd_timeline(&input, &person, &format, category, from, to, include_shared),
         Commands::Search { query, format } => cmd_search(&input, &query, &format),
         Commands::Validate { correct } => cmd_validate(&input, correct),
         Commands::AddFact {
@@ -142,7 +151,8 @@ fn main() -> Result<()> {
             text,
             with,
             dry_run,
-        } => cmd_add_fact(&input, &person, &date, &category, &text, with, dry_run),
+            propagate,
+        } => cmd_add_fact(&input, &person, &date, &category, &text, with, dry_run, propagate),
     }
 }
 
@@ -201,13 +211,21 @@ fn escape_csv(s: &str) -> String {
     }
 }
 
-fn cmd_show(
+/// A fact with its source information (own or shared from another person)
+struct FactWithSource<'a> {
+    fact: &'a Fact,
+    /// None if own fact, Some(person_name) if shared from another person
+    shared_from: Option<&'a str>,
+}
+
+fn cmd_timeline(
     file: &PathBuf,
     person_id: &str,
     format: &OutputFormat,
     category: Option<String>,
     from: Option<u16>,
     to: Option<u16>,
+    include_shared: bool,
 ) -> Result<()> {
     let chronicle = load(file).context("Failed to load chronicle")?;
 
@@ -234,21 +252,104 @@ fn cmd_show(
         filter = filter.to_year(year);
     }
 
-    // Filter and sort facts
-    let mut facts = filter_facts(person, &filter);
-    sort_facts_by_date(&mut facts);
+    // Collect own facts
+    let own_facts: Vec<FactWithSource> = filter_facts(person, &filter)
+        .into_iter()
+        .map(|fact| FactWithSource {
+            fact,
+            shared_from: None,
+        })
+        .collect();
+
+    // Build set of (date, category, text) for owned facts (for deduplication)
+    let owned_keys: HashSet<(&str, &str, &str)> = own_facts
+        .iter()
+        .map(|f| (f.fact.date.as_str(), f.fact.category.as_str(), f.fact.text.as_str()))
+        .collect();
+
+    // Collect shared facts (from other persons where this person is in 'with')
+    let mut all_facts = own_facts;
+
+    if include_shared {
+        for other_person in &chronicle.persons {
+            if other_person.id == person_id {
+                continue;
+            }
+            for fact in &other_person.facts {
+                // Check if this person is in the 'with' field
+                let is_shared = fact
+                    .with
+                    .as_ref()
+                    .is_some_and(|w| w.iter().any(|id| id == person_id));
+
+                if is_shared {
+                    // Skip if this fact duplicates an owned fact (same date, category, text)
+                    let key = (fact.date.as_str(), fact.category.as_str(), fact.text.as_str());
+                    if owned_keys.contains(&key) {
+                        continue;
+                    }
+
+                    // Apply same filters
+                    let shared_date = ChronicleDate::parse(&fact.date).ok();
+                    let shared_year = shared_date.as_ref().and_then(|d| d.year);
+
+                    // Check category filter
+                    if let Some(ref cat) = filter.category {
+                        if &fact.category != cat {
+                            continue;
+                        }
+                    }
+
+                    // Check year filters
+                    if let Some(from_year) = filter.from_year {
+                        if shared_year.is_none() || shared_year.unwrap() < from_year {
+                            continue;
+                        }
+                    }
+                    if let Some(to_year) = filter.to_year {
+                        if shared_year.is_none() || shared_year.unwrap() > to_year {
+                            continue;
+                        }
+                    }
+
+                    // Check text filter
+                    if let Some(ref text) = filter.text {
+                        if !fact.text.to_lowercase().contains(&text.to_lowercase()) {
+                            continue;
+                        }
+                    }
+
+                    all_facts.push(FactWithSource {
+                        fact,
+                        shared_from: Some(&other_person.name),
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort all facts by date
+    all_facts.sort_by(|a, b| {
+        let date_a = ChronicleDate::parse(&a.fact.date).ok();
+        let date_b = ChronicleDate::parse(&b.fact.date).ok();
+        date_a.cmp(&date_b)
+    });
 
     match format {
         OutputFormat::Text => {
             // Print header
             println!("{} - Timeline", person.name.bold());
             println!("{}", "=".repeat(person.name.len() + 11));
+            if include_shared {
+                println!("{}", "(including shared facts)".dimmed());
+            }
             println!();
 
             // Group by year
             let mut current_year: Option<u16> = None;
 
-            for fact in facts {
+            for fact_with_source in &all_facts {
+                let fact = fact_with_source.fact;
                 let date = ChronicleDate::parse(&fact.date).ok();
                 let year = date.as_ref().and_then(|d| d.year);
 
@@ -290,19 +391,31 @@ fn cmd_show(
                     cat_display.white()
                 };
 
+                // Format shared indicator
+                let shared_indicator = match fact_with_source.shared_from {
+                    Some(name) => format!(" {}", format!("(via {})", name).dimmed()),
+                    None => String::new(),
+                };
+
                 println!(
-                    "  {} {:<14} {:<20} {}",
-                    "●".cyan(),
+                    "  {} {:<14} {:<20} {}{}",
+                    if fact_with_source.shared_from.is_some() {
+                        "○".dimmed()
+                    } else {
+                        "●".cyan()
+                    },
                     cat_colored,
                     date_display,
-                    fact.text
+                    fact.text,
+                    shared_indicator
                 );
             }
             println!();
         }
         OutputFormat::Csv => {
-            println!("date,category,text,with");
-            for fact in facts {
+            println!("date,category,text,with,shared_from");
+            for fact_with_source in &all_facts {
+                let fact = fact_with_source.fact;
                 let cat_label = chronicle
                     .find_category(&fact.category)
                     .map(|c| c.label.as_str())
@@ -312,20 +425,23 @@ fn cmd_show(
                     .as_ref()
                     .map(|w| w.join(";"))
                     .unwrap_or_default();
+                let shared_from = fact_with_source.shared_from.unwrap_or("");
                 println!(
-                    "{},{},{},{}",
+                    "{},{},{},{},{}",
                     escape_csv(&fact.date),
                     escape_csv(cat_label),
                     escape_csv(&fact.text),
-                    escape_csv(&with_str)
+                    escape_csv(&with_str),
+                    escape_csv(shared_from)
                 );
             }
         }
         OutputFormat::Md => {
             println!("## {} - Timeline\n", person.name);
-            println!("| Date | Category | Event | With |");
-            println!("|---|---|---|---|");
-            for fact in facts {
+            println!("| Date | Category | Event | With | Shared From |");
+            println!("|---|---|---|---|---|");
+            for fact_with_source in &all_facts {
+                let fact = fact_with_source.fact;
                 let cat_label = chronicle
                     .find_category(&fact.category)
                     .map(|c| c.label.as_str())
@@ -335,9 +451,10 @@ fn cmd_show(
                     .as_ref()
                     .map(|w| w.join(", "))
                     .unwrap_or_default();
+                let shared_from = fact_with_source.shared_from.unwrap_or("");
                 println!(
-                    "| {} | {} | {} | {} |",
-                    fact.date, cat_label, fact.text, with_str
+                    "| {} | {} | {} | {} | {} |",
+                    fact.date, cat_label, fact.text, with_str, shared_from
                 );
             }
         }
@@ -584,6 +701,7 @@ fn cmd_add_fact(
     text: &str,
     with: Option<Vec<String>>,
     dry_run: bool,
+    propagate: bool,
 ) -> Result<()> {
     let mut chronicle = load(file).context("Failed to load chronicle")?;
 
@@ -635,47 +753,97 @@ fn cmd_add_fact(
         }
     }
 
-    // Generate UUID and create fact
+    // Warn if --propagate is used without --with
+    if propagate && with.is_none() {
+        println!(
+            "{}",
+            "Warning: --propagate has no effect without --with".yellow()
+        );
+    }
+
+    // Collect all facts to add (for display purposes)
+    let mut added_facts: Vec<(String, String, String)> = Vec::new(); // (person_name, person_id, fact_id)
+
+    // Generate UUID and create fact for the main person
     let fact_id = Uuid::new_v4().to_string();
     let mut fact = Fact::new(&fact_id, date, category_id, text);
-    if let Some(with_ids) = with {
-        fact = fact.with_persons(with_ids);
+    if let Some(ref with_ids) = with {
+        fact = fact.with_persons(with_ids.clone());
     }
 
     // Get person name for output
     let person_name = chronicle.find_person(person_id).unwrap().name.clone();
+    added_facts.push((person_name.clone(), person_id.to_string(), fact_id.clone()));
 
-    // Add fact to person
+    // Add fact to main person
     let person = chronicle
         .find_person_mut(person_id)
         .expect("Person already validated");
     person.facts.push(fact);
 
+    // If propagate is enabled and there are 'with' persons, create facts for them too
+    if propagate {
+        if let Some(ref with_ids) = with {
+            for target_id in with_ids {
+                // Build the 'with' list for this person: original person + other with persons
+                let mut target_with: Vec<String> = vec![person_id.to_string()];
+                for other_id in with_ids {
+                    if other_id != target_id {
+                        target_with.push(other_id.clone());
+                    }
+                }
+
+                // Create fact for this person
+                let target_fact_id = Uuid::new_v4().to_string();
+                let target_fact =
+                    Fact::new(&target_fact_id, date, category_id, text).with_persons(target_with);
+
+                let target_name = chronicle.find_person(target_id).unwrap().name.clone();
+                added_facts.push((target_name, target_id.clone(), target_fact_id));
+
+                // Add fact to target person
+                let target_person = chronicle
+                    .find_person_mut(target_id)
+                    .expect("Person already validated");
+                target_person.facts.push(target_fact);
+            }
+        }
+    }
+
     if dry_run {
         println!("{}", "Dry run - not saving changes".yellow());
         println!();
-        println!("Would add to {}:", person_name.bold());
-        println!(
-            "  {} {} [{}] {}",
-            "●".cyan(),
-            date,
-            category_label,
-            text
-        );
-        println!("  UUID: {}", fact_id);
+        println!("Would add {} fact(s):", added_facts.len());
+        for (name, _id, uuid) in &added_facts {
+            println!();
+            println!("  {}:", name.bold());
+            println!(
+                "    {} {} [{}] {}",
+                "●".cyan(),
+                date,
+                category_label,
+                text
+            );
+            println!("    UUID: {}", uuid);
+        }
     } else {
         save(file, &chronicle).context("Failed to save chronicle")?;
-        println!("{}", "Fact added successfully".green());
-        println!();
-        println!("Added to {}:", person_name.bold());
         println!(
-            "  {} {} [{}] {}",
-            "●".cyan(),
-            date,
-            category_label,
-            text
+            "{}",
+            format!("{} fact(s) added successfully", added_facts.len()).green()
         );
-        println!("  UUID: {}", fact_id);
+        for (name, _id, uuid) in &added_facts {
+            println!();
+            println!("  {}:", name.bold());
+            println!(
+                "    {} {} [{}] {}",
+                "●".cyan(),
+                date,
+                category_label,
+                text
+            );
+            println!("    UUID: {}", uuid);
+        }
     }
 
     Ok(())

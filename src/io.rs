@@ -1,6 +1,7 @@
 //! File I/O for chronicles.
 
 use crate::Chronicle;
+use chrono::Utc;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
@@ -23,8 +24,11 @@ pub fn load<P: AsRef<Path>>(path: P) -> Result<Chronicle, IoError> {
 }
 
 /// Save a chronicle to a JSON file.
+/// Automatically updates the `last_updated` timestamp to the current UTC time.
 pub fn save<P: AsRef<Path>>(path: P, chronicle: &Chronicle) -> Result<(), IoError> {
-    let json = serde_json::to_string_pretty(chronicle)?;
+    let mut chronicle = chronicle.clone();
+    chronicle.last_updated = Some(Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    let json = serde_json::to_string_pretty(&chronicle)?;
     fs::write(path, json)?;
     Ok(())
 }

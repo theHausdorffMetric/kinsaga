@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-21
+**Last Updated:** 2025-12-26
 
 ## Overview
 
@@ -25,7 +25,7 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | Command | Description |
 |---------|-------------|
 | `kinsaga list` | List all persons (id, name, fact count) |
-| `kinsaga show <person>` | Show timeline for a person |
+| `kinsaga timeline <person>` | Show timeline for a person |
 | `kinsaga search <query>` | Search text across all persons |
 | `kinsaga validate` | Validate chronicle structure, references, and UUIDs |
 | `kinsaga add-fact <person>` | Add a new fact to a person's timeline |
@@ -33,16 +33,18 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 #### Command Options
 | Option | Commands | Description |
 |--------|----------|-------------|
-| `--format <fmt>` / `-f` | list, show, search | Output format: `text` (default), `csv`, `md` |
-| `--category <cat>` / `-c` | show | Filter by category |
-| `--from <year>` | show | Filter from year (inclusive) |
-| `--to <year>` | show | Filter to year (inclusive) |
+| `--format <fmt>` / `-f` | list, timeline, search | Output format: `text` (default), `csv`, `md` |
+| `--category <cat>` / `-c` | timeline | Filter by category |
+| `--from <year>` | timeline | Filter from year (inclusive) |
+| `--to <year>` | timeline | Filter to year (inclusive) |
+| `--include-shared` | timeline | Include facts from others where this person is in their `with` field |
 | `--correct` | validate | Generate valid UUIDs for invalid/missing/duplicate and output JSON to stdout |
 | `--date <date>` / `-d` | add-fact | Date (ISO 8601, required) |
 | `--category <cat>` / `-c` | add-fact | Category ID (required) |
 | `--text <text>` / `-t` | add-fact | Event description (required) |
 | `--with <ids>` / `-w` | add-fact | Comma-separated person IDs involved |
 | `--dry-run` | add-fact | Preview without saving to file |
+| `--propagate` | add-fact | Also create the fact for each person in `--with` (with cross-references) |
 
 #### Validation Checks
 | Check | Level | Description |
@@ -99,6 +101,7 @@ colored = "2.1"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
+chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3.15"
@@ -111,6 +114,7 @@ tempfile = "3.15"
 {
   "version": "1.0",
   "title": "Optional Chronicle Title",
+  "last_updated": "2025-12-26T14:30:00Z",
   "categories": [
     { "id": "education", "label": "Education & Job", "color": "#4A90D9" }
   ],
@@ -147,7 +151,7 @@ Not yet started. Planned features:
 1. **WASM Bindings** - Compile core library to WebAssembly
 2. **Web App** - Yew-based web interface for viewing/editing
 
-Note: CSV export is now available via `--format csv` flag on list, show, and search commands.
+Note: CSV export is now available via `--format csv` flag on list, timeline, and search commands.
 
 ## How to Build & Test
 
@@ -160,14 +164,14 @@ cargo test
 
 # Try CLI (using -i flag)
 ./target/release/kinsaga -i examples/sample-chronicle.json list
-./target/release/kinsaga -i examples/sample-chronicle.json show alice
+./target/release/kinsaga -i examples/sample-chronicle.json timeline alice
 ./target/release/kinsaga -i examples/sample-chronicle.json search "Springfield"
 ./target/release/kinsaga -i examples/sample-chronicle.json validate
 
 # Or set environment variable
 export KINSAGA_INPUT=examples/sample-chronicle.json
 ./target/release/kinsaga list
-./target/release/kinsaga show alice --from 1990 --to 2000
+./target/release/kinsaga timeline alice --from 1990 --to 2000
 
 # Or use .env file
 echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
@@ -176,7 +180,7 @@ echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
 # Output formats
 ./target/release/kinsaga -i examples/sample-chronicle.json list -f csv
 ./target/release/kinsaga -i examples/sample-chronicle.json list -f md
-./target/release/kinsaga -i examples/sample-chronicle.json show alice -f csv > alice.csv
+./target/release/kinsaga -i examples/sample-chronicle.json timeline alice -f csv > alice.csv
 
 # Validate and correct UUIDs
 ./target/release/kinsaga -i examples/sample-chronicle.json validate --correct > corrected.json
@@ -188,6 +192,9 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2020-06-15 -c family -t "Graduated from university"
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2021 -c travel -t "Trip to Paris" -w bob
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 1995? -c education -t "Started school" --dry-run
+
+# Add fact and propagate to all persons in --with
+./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-06-15 -c family -t "Family reunion" -w bob --propagate
 ```
 
 ## Design Decisions
@@ -201,6 +208,7 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 | Categories | User-defined in JSON |
 | Storage | Local JSON file |
 | Editing | `add-fact` command or text editor for manual edits |
+| Last updated | Auto-set to UTC timestamp on every save |
 
 ## Privacy Note
 
