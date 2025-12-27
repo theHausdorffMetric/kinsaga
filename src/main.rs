@@ -85,6 +85,10 @@ enum Commands {
         /// Generate valid UUIDs for empty/invalid ones and output corrected JSON to stdout
         #[arg(long)]
         correct: bool,
+
+        /// Write corrected JSON back to the input file (requires --correct)
+        #[arg(long, requires = "correct")]
+        in_place: bool,
     },
 
     /// Add a new fact to a person's timeline
@@ -143,7 +147,7 @@ fn main() -> Result<()> {
             include_shared,
         } => cmd_timeline(&input, &person, &format, category, from, to, include_shared),
         Commands::Search { query, format } => cmd_search(&input, &query, &format),
-        Commands::Validate { correct } => cmd_validate(&input, correct),
+        Commands::Validate { correct, in_place } => cmd_validate(&input, correct, in_place),
         Commands::AddFact {
             person,
             date,
@@ -537,7 +541,7 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat) -> Result<()> 
     Ok(())
 }
 
-fn cmd_validate(file: &PathBuf, correct: bool) -> Result<()> {
+fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool) -> Result<()> {
     let chronicle = load(file).context("Failed to load chronicle")?;
 
     let mut warnings = Vec::new();
@@ -647,11 +651,20 @@ fn cmd_validate(file: &PathBuf, correct: bool) -> Result<()> {
     // Handle --correct flag
     if correct && !needs_correction.is_empty() {
         let corrected = correct_uuids(chronicle, &needs_correction);
-        let json = serde_json::to_string_pretty(&corrected)
-            .context("Failed to serialize corrected chronicle")?;
-        println!();
-        println!("{}", "--- Corrected JSON ---".cyan());
-        println!("{}", json);
+        if in_place {
+            save(file, &corrected).context("Failed to save corrected chronicle")?;
+            println!();
+            println!(
+                "{}",
+                format!("✓ Corrected {} UUID(s) and saved to file", needs_correction.len()).green()
+            );
+        } else {
+            let json = serde_json::to_string_pretty(&corrected)
+                .context("Failed to serialize corrected chronicle")?;
+            println!();
+            println!("{}", "--- Corrected JSON ---".cyan());
+            println!("{}", json);
+        }
     } else if correct && needs_correction.is_empty() {
         println!();
         println!("{}", "No UUID corrections needed.".green());

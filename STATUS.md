@@ -39,6 +39,7 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | `--to <year>` | timeline | Filter to year (inclusive) |
 | `--include-shared` | timeline | Include facts from others where this person is in their `with` field |
 | `--correct` | validate | Generate valid UUIDs for invalid/missing/duplicate and output JSON to stdout |
+| `--in-place` | validate | Write corrected JSON back to the input file (requires `--correct`) |
 | `--date <date>` / `-d` | add-fact | Date (ISO 8601, required) |
 | `--category <cat>` / `-c` | add-fact | Category ID (required) |
 | `--text <text>` / `-t` | add-fact | Event description (required) |
@@ -182,8 +183,11 @@ echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
 ./target/release/kinsaga -i examples/sample-chronicle.json list -f md
 ./target/release/kinsaga -i examples/sample-chronicle.json timeline alice -f csv > alice.csv
 
-# Validate and correct UUIDs
+# Validate and correct UUIDs (output to stdout)
 ./target/release/kinsaga -i examples/sample-chronicle.json validate --correct > corrected.json
+
+# Validate and correct UUIDs (modify file in place)
+./target/release/kinsaga -i examples/sample-chronicle.json validate --correct --in-place
 
 # Enable logging
 RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validate
