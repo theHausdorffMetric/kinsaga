@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-26
+**Last Updated:** 2025-12-27
 
 ## Overview
 
@@ -29,6 +29,7 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | `kinsaga search <query>` | Search text across all persons |
 | `kinsaga validate` | Validate chronicle structure, references, and UUIDs |
 | `kinsaga add-fact <person>` | Add a new fact to a person's timeline |
+| `kinsaga merge <source>` | Merge another chronicle JSON file into the main chronicle |
 
 #### Command Options
 | Option | Commands | Description |
@@ -46,6 +47,10 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | `--with <ids>` / `-w` | add-fact | Comma-separated person IDs involved |
 | `--dry-run` | add-fact | Preview without saving to file |
 | `--propagate` | add-fact | Also create the fact for each person in `--with` (with cross-references) |
+| `--dry-run` | merge | Preview changes without saving |
+| `--on-conflict <strategy>` | merge | How to handle category conflicts: `skip` (default), `overwrite`, `fail` |
+| `--duplicates <strategy>` | merge | How to handle duplicate facts: `skip` (default), `add` |
+| `--regenerate-uuids` | merge | Generate new UUIDs for all merged facts |
 
 #### Validation Checks
 | Check | Level | Description |
@@ -199,6 +204,11 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 
 # Add fact and propagate to all persons in --with
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-06-15 -c family -t "Family reunion" -w bob --propagate
+
+# Merge chronicles
+./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --dry-run
+./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --on-conflict overwrite
+./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --duplicates add --regenerate-uuids
 ```
 
 ## Design Decisions

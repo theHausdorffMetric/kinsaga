@@ -120,6 +120,50 @@ enum Commands {
         #[arg(long)]
         propagate: bool,
     },
+
+    /// Merge another chronicle JSON file into the main chronicle
+    Merge {
+        /// Path to the source chronicle JSON file to merge from
+        source: PathBuf,
+
+        /// Preview merge without saving
+        #[arg(long)]
+        dry_run: bool,
+
+        /// How to handle category/person conflicts
+        #[arg(long, value_enum, default_value_t = ConflictStrategy::Skip)]
+        on_conflict: ConflictStrategy,
+
+        /// How to handle duplicate facts (same date, category, text)
+        #[arg(long, value_enum, default_value_t = DuplicateStrategy::Skip)]
+        duplicates: DuplicateStrategy,
+
+        /// Regenerate all UUIDs from source file (avoids collisions)
+        #[arg(long)]
+        regenerate_uuids: bool,
+    },
+}
+
+/// Strategy for handling category/person conflicts during merge
+#[derive(Clone, Default, ValueEnum)]
+enum ConflictStrategy {
+    /// Skip conflicting items (keep target values)
+    #[default]
+    Skip,
+    /// Overwrite target with source values
+    Overwrite,
+    /// Fail on any conflict
+    Fail,
+}
+
+/// Strategy for handling duplicate facts during merge
+#[derive(Clone, Default, ValueEnum)]
+enum DuplicateStrategy {
+    /// Skip duplicate facts
+    #[default]
+    Skip,
+    /// Add duplicates anyway (with new UUIDs)
+    Add,
 }
 
 fn main() -> Result<()> {
@@ -157,6 +201,13 @@ fn main() -> Result<()> {
             dry_run,
             propagate,
         } => cmd_add_fact(&input, &person, &date, &category, &text, with, dry_run, propagate),
+        Commands::Merge {
+            source,
+            dry_run,
+            on_conflict,
+            duplicates,
+            regenerate_uuids,
+        } => cmd_merge(&input, &source, dry_run, on_conflict, duplicates, regenerate_uuids),
     }
 }
 
@@ -860,6 +911,303 @@ fn cmd_add_fact(
     }
 
     Ok(())
+}
+
+fn cmd_merge(
+    target_file: &PathBuf,
+    source_file: &PathBuf,
+    dry_run: bool,
+    on_conflict: ConflictStrategy,
+    duplicates: DuplicateStrategy,
+    regenerate_uuids: bool,
+) -> Result<()> {
+    let mut target = load(target_file).context("Failed to load target chronicle")?;
+    let source = load(source_file).context("Failed to load source chronicle")?;
+
+    // Track merge statistics
+    let mut stats = MergeStats::default();
+
+    // Collect existing UUIDs in target (for collision detection)
+    let mut existing_uuids: HashSet<String> = HashSet::new();
+    for person in &target.persons {
+        for fact in &person.facts {
+            existing_uuids.insert(fact.id.clone());
+        }
+    }
+
+    // Build lookup maps for target (owned strings to avoid borrow issues)
+    let target_category_ids: HashSet<String> = target.categories.iter().map(|c| c.id.clone()).collect();
+    let target_person_ids: HashSet<String> = target.persons.iter().map(|p| p.id.clone()).collect();
+
+    println!(
+        "Merging {} into {}...",
+        source_file.display(),
+        target_file.display()
+    );
+    println!();
+
+    // === Merge Categories ===
+    println!("{}", "Categories:".bold());
+    for source_cat in &source.categories {
+        if target_category_ids.contains(&source_cat.id) {
+            // Conflict: category exists
+            let target_cat = target.find_category(&source_cat.id).unwrap();
+            let has_diff = target_cat.label != source_cat.label
+                || target_cat.color != source_cat.color;
+
+            if has_diff {
+                match on_conflict {
+                    ConflictStrategy::Skip => {
+                        println!("  {} {} (skipped: conflict)", "~".yellow(), source_cat.id);
+                        stats.categories_skipped += 1;
+                    }
+                    ConflictStrategy::Overwrite => {
+                        // Find and update the category
+                        if let Some(cat) = target.categories.iter_mut().find(|c| c.id == source_cat.id) {
+                            cat.label = source_cat.label.clone();
+                            cat.color = source_cat.color.clone();
+                        }
+                        println!("  {} {} (overwritten)", "~".cyan(), source_cat.id);
+                        stats.categories_overwritten += 1;
+                    }
+                    ConflictStrategy::Fail => {
+                        anyhow::bail!(
+                            "Category conflict: '{}' exists with different values",
+                            source_cat.id
+                        );
+                    }
+                }
+            } else {
+                // Identical, no action needed
+                stats.categories_identical += 1;
+            }
+        } else {
+            // New category
+            target.categories.push(source_cat.clone());
+            println!("  {} {} (new)", "+".green(), source_cat.id);
+            stats.categories_added += 1;
+        }
+    }
+    if stats.categories_added == 0 && stats.categories_skipped == 0 && stats.categories_overwritten == 0 {
+        println!("  (no changes)");
+    }
+    println!();
+
+    // === Merge Persons and Facts ===
+    println!("{}", "Persons:".bold());
+    for source_person in &source.persons {
+        if target_person_ids.contains(&source_person.id) {
+            // Person exists - merge facts
+            // First, gather info we need without holding borrows
+            let (target_name, existing_facts): (String, HashSet<(String, String, String)>) = {
+                let target_person = target.find_person(&source_person.id).unwrap();
+                let facts: HashSet<(String, String, String)> = target_person
+                    .facts
+                    .iter()
+                    .map(|f| (f.date.clone(), f.category.clone(), f.text.clone()))
+                    .collect();
+                (target_person.name.clone(), facts)
+            };
+
+            // Check for name conflict
+            if target_name != source_person.name {
+                match on_conflict {
+                    ConflictStrategy::Skip => {
+                        // Keep target name, but still merge facts
+                    }
+                    ConflictStrategy::Overwrite => {
+                        if let Some(p) = target.find_person_mut(&source_person.id) {
+                            p.name = source_person.name.clone();
+                        }
+                    }
+                    ConflictStrategy::Fail => {
+                        anyhow::bail!(
+                            "Person conflict: '{}' has different name ('{}' vs '{}')",
+                            source_person.id,
+                            target_name,
+                            source_person.name
+                        );
+                    }
+                }
+            }
+
+            let mut facts_added = 0;
+            let mut facts_skipped = 0;
+
+            // Collect facts to add first
+            let mut facts_to_add: Vec<Fact> = Vec::new();
+
+            for source_fact in &source_person.facts {
+                let fact_key = (
+                    source_fact.date.clone(),
+                    source_fact.category.clone(),
+                    source_fact.text.clone(),
+                );
+
+                let is_duplicate = existing_facts.contains(&fact_key);
+
+                if is_duplicate {
+                    match duplicates {
+                        DuplicateStrategy::Skip => {
+                            facts_skipped += 1;
+                            stats.facts_skipped += 1;
+                            continue;
+                        }
+                        DuplicateStrategy::Add => {
+                            // Will add below with new UUID
+                        }
+                    }
+                }
+
+                // Determine UUID
+                let new_uuid = if regenerate_uuids || existing_uuids.contains(&source_fact.id) {
+                    let uuid = Uuid::new_v4().to_string();
+                    existing_uuids.insert(uuid.clone());
+                    uuid
+                } else {
+                    existing_uuids.insert(source_fact.id.clone());
+                    source_fact.id.clone()
+                };
+
+                // Create fact with potentially new UUID
+                let mut new_fact = Fact::new(&new_uuid, &source_fact.date, &source_fact.category, &source_fact.text);
+                if let Some(ref with) = source_fact.with {
+                    new_fact = new_fact.with_persons(with.clone());
+                }
+
+                facts_to_add.push(new_fact);
+                facts_added += 1;
+                stats.facts_added += 1;
+            }
+
+            // Now add all facts to target person
+            if let Some(p) = target.find_person_mut(&source_person.id) {
+                p.facts.extend(facts_to_add);
+            }
+
+            if facts_added > 0 || facts_skipped > 0 {
+                let mut parts = Vec::new();
+                if facts_added > 0 {
+                    parts.push(format!("{} facts added", facts_added));
+                }
+                if facts_skipped > 0 {
+                    parts.push(format!("{} duplicates skipped", facts_skipped));
+                }
+                println!(
+                    "  {} {} (merged: {})",
+                    "~".cyan(),
+                    source_person.id,
+                    parts.join(", ")
+                );
+                stats.persons_merged += 1;
+            }
+        } else {
+            // New person - add entirely
+            let mut new_person = source_person.clone();
+
+            // Regenerate UUIDs if needed
+            if regenerate_uuids {
+                for fact in &mut new_person.facts {
+                    let new_uuid = Uuid::new_v4().to_string();
+                    existing_uuids.insert(new_uuid.clone());
+                    fact.id = new_uuid;
+                }
+            } else {
+                // Check for UUID collisions and fix them
+                for fact in &mut new_person.facts {
+                    if existing_uuids.contains(&fact.id) {
+                        let new_uuid = Uuid::new_v4().to_string();
+                        existing_uuids.insert(new_uuid.clone());
+                        fact.id = new_uuid;
+                    } else {
+                        existing_uuids.insert(fact.id.clone());
+                    }
+                }
+            }
+
+            let fact_count = new_person.facts.len();
+            target.persons.push(new_person);
+            println!(
+                "  {} {} (new, {} facts)",
+                "+".green(),
+                source_person.id,
+                fact_count
+            );
+            stats.persons_added += 1;
+            stats.facts_added += fact_count;
+        }
+    }
+    if stats.persons_added == 0 && stats.persons_merged == 0 {
+        println!("  (no changes)");
+    }
+    println!();
+
+    // === Validate with references ===
+    let mut with_warnings = Vec::new();
+    let final_person_ids: HashSet<&str> = target.persons.iter().map(|p| p.id.as_str()).collect();
+    for person in &target.persons {
+        for fact in &person.facts {
+            if let Some(ref with) = fact.with {
+                for with_id in with {
+                    if !final_person_ids.contains(with_id.as_str()) {
+                        with_warnings.push(format!(
+                            "Person '{}', fact '{}': references unknown person '{}'",
+                            person.id,
+                            fact.text.chars().take(30).collect::<String>(),
+                            with_id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if !with_warnings.is_empty() {
+        println!("{}", "Warnings:".yellow());
+        for warning in &with_warnings {
+            println!("  {} {}", "!".yellow(), warning);
+        }
+        println!();
+    }
+
+    // === Summary ===
+    println!("{}", "Summary:".bold());
+    println!(
+        "  Categories: {} added, {} skipped, {} overwritten",
+        stats.categories_added, stats.categories_skipped, stats.categories_overwritten
+    );
+    println!(
+        "  Persons: {} added, {} merged",
+        stats.persons_added, stats.persons_merged
+    );
+    println!(
+        "  Facts: {} added, {} skipped (duplicates)",
+        stats.facts_added, stats.facts_skipped
+    );
+    println!();
+
+    // === Save ===
+    if dry_run {
+        println!("{}", "Dry run - no changes saved".yellow());
+    } else {
+        save(target_file, &target).context("Failed to save merged chronicle")?;
+        println!("{}", format!("✓ Saved to {}", target_file.display()).green());
+    }
+
+    Ok(())
+}
+
+/// Statistics for merge operation
+#[derive(Default)]
+struct MergeStats {
+    categories_added: usize,
+    categories_skipped: usize,
+    categories_overwritten: usize,
+    categories_identical: usize,
+    persons_added: usize,
+    persons_merged: usize,
+    facts_added: usize,
+    facts_skipped: usize,
 }
 
 fn format_date_display(date_str: &str) -> String {
