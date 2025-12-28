@@ -41,4 +41,7 @@ pub mod model;
 pub use date::ChronicleDate;
 pub use filter::{search, FactFilter, SearchResult};
 pub use io::{load, save};
-pub use model::{Category, Chronicle, Fact, Person};
+pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};
+
+// Re-export url::Url for convenience
+pub use url::Url;

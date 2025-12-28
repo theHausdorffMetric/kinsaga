@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use kinsaga::filter::{filter_facts, FactFilter};
-use kinsaga::{load, save, search, Chronicle, ChronicleDate, Fact};
+use kinsaga::{load, save, search, Attachment, Chronicle, ChronicleDate, Coordinates, Fact, Location, Url};
 use log::{error, warn};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -112,6 +112,34 @@ enum Commands {
         #[arg(short, long, value_delimiter = ',')]
         with: Option<Vec<String>>,
 
+        /// Country where the event occurred (required if specifying location)
+        #[arg(long)]
+        country: Option<String>,
+
+        /// City where the event occurred (optional, requires --country)
+        #[arg(long, requires = "country")]
+        city: Option<String>,
+
+        /// GPS latitude (optional, requires --country and --lon)
+        #[arg(long, requires_all = ["country", "lon"], allow_hyphen_values = true)]
+        lat: Option<f64>,
+
+        /// GPS longitude (optional, requires --country and --lat)
+        #[arg(long, requires_all = ["country", "lat"], allow_hyphen_values = true)]
+        lon: Option<f64>,
+
+        /// Attachment URL (can be specified multiple times)
+        #[arg(long = "attach", value_name = "URL")]
+        attachments: Option<Vec<String>>,
+
+        /// MIME content type for attachments (applies to all --attach URLs)
+        #[arg(long = "attach-type", value_name = "MIME")]
+        attach_type: Option<String>,
+
+        /// Title/description for attachments (applies to all --attach URLs)
+        #[arg(long = "attach-title", value_name = "TITLE")]
+        attach_title: Option<String>,
+
         /// Preview only, don't save to file
         #[arg(long)]
         dry_run: bool,
@@ -198,9 +226,32 @@ fn main() -> Result<()> {
             category,
             text,
             with,
+            country,
+            city,
+            lat,
+            lon,
+            attachments,
+            attach_type,
+            attach_title,
             dry_run,
             propagate,
-        } => cmd_add_fact(&input, &person, &date, &category, &text, with, dry_run, propagate),
+        } => cmd_add_fact(
+            &input,
+            &person,
+            &date,
+            &category,
+            &text,
+            with,
+            country,
+            city,
+            lat,
+            lon,
+            attachments,
+            attach_type,
+            attach_title,
+            dry_run,
+            propagate,
+        ),
         Commands::Merge {
             source,
             dry_run,
@@ -464,11 +515,26 @@ fn cmd_timeline(
                     fact.text,
                     shared_indicator
                 );
+
+                // Show location if present
+                if let Some(ref location) = fact.location {
+                    println!("    {} {}", "📍".dimmed(), format_location(location).dimmed());
+                }
+
+                // Show attachments if present
+                for attachment in &fact.attachments {
+                    let att_display = if let Some(ref title) = attachment.title {
+                        format!("{} ({})", title, attachment.url)
+                    } else {
+                        attachment.url.to_string()
+                    };
+                    println!("    {} {}", "📎".dimmed(), att_display.dimmed());
+                }
             }
             println!();
         }
         OutputFormat::Csv => {
-            println!("date,category,text,with,shared_from");
+            println!("date,category,text,with,shared_from,location,attachments");
             for fact_with_source in &all_facts {
                 let fact = fact_with_source.fact;
                 let cat_label = chronicle
@@ -481,20 +547,33 @@ fn cmd_timeline(
                     .map(|w| w.join(";"))
                     .unwrap_or_default();
                 let shared_from = fact_with_source.shared_from.unwrap_or("");
+                let location_str = fact
+                    .location
+                    .as_ref()
+                    .map(|l| format_location(l))
+                    .unwrap_or_default();
+                let attachments_str: String = fact
+                    .attachments
+                    .iter()
+                    .map(|a| a.url.to_string())
+                    .collect::<Vec<_>>()
+                    .join(";");
                 println!(
-                    "{},{},{},{},{}",
+                    "{},{},{},{},{},{},{}",
                     escape_csv(&fact.date),
                     escape_csv(cat_label),
                     escape_csv(&fact.text),
                     escape_csv(&with_str),
-                    escape_csv(shared_from)
+                    escape_csv(shared_from),
+                    escape_csv(&location_str),
+                    escape_csv(&attachments_str)
                 );
             }
         }
         OutputFormat::Md => {
             println!("## {} - Timeline\n", person.name);
-            println!("| Date | Category | Event | With | Shared From |");
-            println!("|---|---|---|---|---|");
+            println!("| Date | Category | Event | With | Location | Attachments | Shared From |");
+            println!("|---|---|---|---|---|---|---|");
             for fact_with_source in &all_facts {
                 let fact = fact_with_source.fact;
                 let cat_label = chronicle
@@ -507,9 +586,26 @@ fn cmd_timeline(
                     .map(|w| w.join(", "))
                     .unwrap_or_default();
                 let shared_from = fact_with_source.shared_from.unwrap_or("");
+                let location_str = fact
+                    .location
+                    .as_ref()
+                    .map(|l| format_location(l))
+                    .unwrap_or_default();
+                let attachments_str: String = fact
+                    .attachments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref title) = a.title {
+                            format!("[{}]({})", title, a.url)
+                        } else {
+                            format!("[link]({})", a.url)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 println!(
-                    "| {} | {} | {} | {} | {} |",
-                    fact.date, cat_label, fact.text, with_str, shared_from
+                    "| {} | {} | {} | {} | {} | {} | {} |",
+                    fact.date, cat_label, fact.text, with_str, location_str, attachments_str, shared_from
                 );
             }
         }
@@ -553,37 +649,86 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat) -> Result<()> 
                     cat_label,
                     result.fact.text
                 );
+
+                // Show location if present
+                if let Some(ref location) = result.fact.location {
+                    println!("  {} {}", "📍".dimmed(), format_location(location).dimmed());
+                }
+
+                // Show attachments if present
+                for attachment in &result.fact.attachments {
+                    let att_display = if let Some(ref title) = attachment.title {
+                        format!("{} ({})", title, attachment.url)
+                    } else {
+                        attachment.url.to_string()
+                    };
+                    println!("  {} {}", "📎".dimmed(), att_display.dimmed());
+                }
             }
         }
         OutputFormat::Csv => {
-            println!("person_id,person_name,date,category,text");
+            println!("person_id,person_name,date,category,text,location,attachments");
             for result in results {
                 let cat_label = chronicle
                     .find_category(&result.fact.category)
                     .map(|c| c.label.as_str())
                     .unwrap_or(&result.fact.category);
+                let location_str = result
+                    .fact
+                    .location
+                    .as_ref()
+                    .map(|l| format_location(l))
+                    .unwrap_or_default();
+                let attachments_str: String = result
+                    .fact
+                    .attachments
+                    .iter()
+                    .map(|a| a.url.to_string())
+                    .collect::<Vec<_>>()
+                    .join(";");
                 println!(
-                    "{},{},{},{},{}",
+                    "{},{},{},{},{},{},{}",
                     escape_csv(&result.person.id),
                     escape_csv(&result.person.name),
                     escape_csv(&result.fact.date),
                     escape_csv(cat_label),
-                    escape_csv(&result.fact.text)
+                    escape_csv(&result.fact.text),
+                    escape_csv(&location_str),
+                    escape_csv(&attachments_str)
                 );
             }
         }
         OutputFormat::Md => {
             println!("## Search results for '{}'\n", query);
-            println!("| Person | Date | Category | Event |");
-            println!("|---|---|---|---|");
+            println!("| Person | Date | Category | Event | Location | Attachments |");
+            println!("|---|---|---|---|---|---|");
             for result in results {
                 let cat_label = chronicle
                     .find_category(&result.fact.category)
                     .map(|c| c.label.as_str())
                     .unwrap_or(&result.fact.category);
+                let location_str = result
+                    .fact
+                    .location
+                    .as_ref()
+                    .map(|l| format_location(l))
+                    .unwrap_or_default();
+                let attachments_str: String = result
+                    .fact
+                    .attachments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref title) = a.title {
+                            format!("[{}]({})", title, a.url)
+                        } else {
+                            format!("[link]({})", a.url)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 println!(
-                    "| {} | {} | {} | {} |",
-                    result.person.name, result.fact.date, cat_label, result.fact.text
+                    "| {} | {} | {} | {} | {} | {} |",
+                    result.person.name, result.fact.date, cat_label, result.fact.text, location_str, attachments_str
                 );
             }
         }
@@ -661,6 +806,48 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool) -> Result<()> {
                         let msg = format!(
                             "Person '{}', fact '{}': unknown person reference '{}'",
                             person.id, fact.id, person_ref
+                        );
+                        warn!("{}", msg);
+                        warnings.push(msg);
+                    }
+                }
+            }
+
+            // Location validation
+            if let Some(ref location) = fact.location {
+                // Country must not be empty
+                if location.country.trim().is_empty() {
+                    let msg = format!(
+                        "Person '{}', fact '{}': empty country in location",
+                        person.id, fact.id
+                    );
+                    warn!("{}", msg);
+                    warnings.push(msg);
+                }
+
+                // GPS coordinates validation
+                if let Some(ref coords) = location.coordinates {
+                    if !coords.is_valid() {
+                        let msg = format!(
+                            "Person '{}', fact '{}': invalid GPS coordinates (lat: {}, lon: {}). \
+                            Valid ranges: lat -90..90, lon -180..180",
+                            person.id, fact.id, coords.lat, coords.lon
+                        );
+                        warn!("{}", msg);
+                        warnings.push(msg);
+                    }
+                }
+            }
+
+            // Attachments validation
+            for (i, attachment) in fact.attachments.iter().enumerate() {
+                // MIME type validation (if present)
+                if let Some(ref content_type) = attachment.content_type {
+                    if !is_valid_mime_type(content_type) {
+                        let msg = format!(
+                            "Person '{}', fact '{}': attachment {}: invalid MIME type '{}' \
+                            (expected format: type/subtype)",
+                            person.id, fact.id, i + 1, content_type
                         );
                         warn!("{}", msg);
                         warnings.push(msg);
@@ -764,6 +951,13 @@ fn cmd_add_fact(
     category_id: &str,
     text: &str,
     with: Option<Vec<String>>,
+    country: Option<String>,
+    city: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    attachments: Option<Vec<String>>,
+    attach_type: Option<String>,
+    attach_title: Option<String>,
     dry_run: bool,
     propagate: bool,
 ) -> Result<()> {
@@ -817,6 +1011,55 @@ fn cmd_add_fact(
         }
     }
 
+    // Build location if country is provided
+    let location = if let Some(ref country_name) = country {
+        let mut loc = Location::new(country_name);
+        if let Some(ref city_name) = city {
+            loc = loc.with_city(city_name);
+        }
+        if let (Some(lat_val), Some(lon_val)) = (lat, lon) {
+            let coords = Coordinates::new(lat_val, lon_val);
+            if !coords.is_valid() {
+                anyhow::bail!(
+                    "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
+                    lat_val, lon_val
+                );
+            }
+            loc = loc.with_coordinates(coords);
+        }
+        Some(loc)
+    } else {
+        None
+    };
+
+    // Build attachments if provided
+    let parsed_attachments: Vec<Attachment> = if let Some(ref urls) = attachments {
+        let mut result = Vec::new();
+        for url_str in urls {
+            let url = Url::parse(url_str).context(format!(
+                "Invalid URL '{}'. URLs must include a scheme (e.g., file://, https://, s3://)",
+                url_str
+            ))?;
+            let mut attachment = Attachment::new(url);
+            if let Some(ref content_type) = attach_type {
+                if !is_valid_mime_type(content_type) {
+                    anyhow::bail!(
+                        "Invalid MIME type '{}'. Expected format: type/subtype (e.g., image/jpeg)",
+                        content_type
+                    );
+                }
+                attachment = attachment.with_content_type(content_type);
+            }
+            if let Some(ref title) = attach_title {
+                attachment = attachment.with_title(title);
+            }
+            result.push(attachment);
+        }
+        result
+    } else {
+        Vec::new()
+    };
+
     // Warn if --propagate is used without --with
     if propagate && with.is_none() {
         println!(
@@ -833,6 +1076,12 @@ fn cmd_add_fact(
     let mut fact = Fact::new(&fact_id, date, category_id, text);
     if let Some(ref with_ids) = with {
         fact = fact.with_persons(with_ids.clone());
+    }
+    if let Some(ref loc) = location {
+        fact = fact.with_location(loc.clone());
+    }
+    if !parsed_attachments.is_empty() {
+        fact = fact.with_attachments(parsed_attachments.clone());
     }
 
     // Get person name for output
@@ -857,10 +1106,16 @@ fn cmd_add_fact(
                     }
                 }
 
-                // Create fact for this person
+                // Create fact for this person (with same location and attachments)
                 let target_fact_id = Uuid::new_v4().to_string();
-                let target_fact =
+                let mut target_fact =
                     Fact::new(&target_fact_id, date, category_id, text).with_persons(target_with);
+                if let Some(ref loc) = location {
+                    target_fact = target_fact.with_location(loc.clone());
+                }
+                if !parsed_attachments.is_empty() {
+                    target_fact = target_fact.with_attachments(parsed_attachments.clone());
+                }
 
                 let target_name = chronicle.find_person(target_id).unwrap().name.clone();
                 added_facts.push((target_name, target_id.clone(), target_fact_id));
@@ -873,6 +1128,31 @@ fn cmd_add_fact(
             }
         }
     }
+
+    // Format location for display
+    let location_display = location.as_ref().map(|loc| {
+        let mut parts = Vec::new();
+        if let Some(ref city_name) = loc.city {
+            parts.push(city_name.clone());
+        }
+        parts.push(loc.country.clone());
+        if let Some(ref coords) = loc.coordinates {
+            parts.push(format!("({:.4}, {:.4})", coords.lat, coords.lon));
+        }
+        parts.join(", ")
+    });
+
+    // Format attachments for display
+    let attachments_display: Vec<String> = parsed_attachments
+        .iter()
+        .map(|a| {
+            let mut s = a.url.to_string();
+            if let Some(ref t) = a.title {
+                s = format!("{} ({})", t, s);
+            }
+            s
+        })
+        .collect();
 
     if dry_run {
         println!("{}", "Dry run - not saving changes".yellow());
@@ -888,6 +1168,12 @@ fn cmd_add_fact(
                 category_label,
                 text
             );
+            if let Some(ref loc_str) = location_display {
+                println!("    Location: {}", loc_str);
+            }
+            for att_str in &attachments_display {
+                println!("    Attachment: {}", att_str);
+            }
             println!("    UUID: {}", uuid);
         }
     } else {
@@ -906,6 +1192,12 @@ fn cmd_add_fact(
                 category_label,
                 text
             );
+            if let Some(ref loc_str) = location_display {
+                println!("    Location: {}", loc_str);
+            }
+            for att_str in &attachments_display {
+                println!("    Attachment: {}", att_str);
+            }
             println!("    UUID: {}", uuid);
         }
     }
@@ -1074,6 +1366,12 @@ fn cmd_merge(
                 if let Some(ref with) = source_fact.with {
                     new_fact = new_fact.with_persons(with.clone());
                 }
+                if let Some(ref location) = source_fact.location {
+                    new_fact = new_fact.with_location(location.clone());
+                }
+                if !source_fact.attachments.is_empty() {
+                    new_fact = new_fact.with_attachments(source_fact.attachments.clone());
+                }
 
                 facts_to_add.push(new_fact);
                 facts_added += 1;
@@ -1213,4 +1511,37 @@ struct MergeStats {
 fn format_date_display(date_str: &str) -> String {
     // Just return the date as-is for now, padded
     date_str.to_string()
+}
+
+/// Format a location for display.
+fn format_location(location: &Location) -> String {
+    let mut parts = Vec::new();
+    if let Some(ref city) = location.city {
+        parts.push(city.clone());
+    }
+    parts.push(location.country.clone());
+    if let Some(ref coords) = location.coordinates {
+        parts.push(format!("({:.4}, {:.4})", coords.lat, coords.lon));
+    }
+    parts.join(", ")
+}
+
+/// Check if a string is a valid MIME type (basic format: type/subtype).
+fn is_valid_mime_type(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let type_part = parts[0];
+    let subtype_part = parts[1];
+
+    // Both parts must be non-empty and contain only valid characters
+    // Valid MIME characters: alphanumeric, hyphen, plus, dot
+    let is_valid_part = |p: &str| {
+        !p.is_empty()
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+' || c == '.')
+    };
+
+    is_valid_part(type_part) && is_valid_part(subtype_part)
 }

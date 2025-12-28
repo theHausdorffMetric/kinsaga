@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-27
+**Last Updated:** 2025-12-28
 
 ## Overview
 
@@ -9,7 +9,7 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 ## Completed Features
 
 ### Core Library (`src/lib.rs`)
-- **Data Model** (`src/model.rs`): Chronicle, Person, Fact, Category structs with serde serialization
+- **Data Model** (`src/model.rs`): Chronicle, Person, Fact, Category, Location, Coordinates, Attachment structs with serde serialization
 - **Date Parsing** (`src/date.rs`): ISO 8601 dates with optional `?` suffix for uncertainty (e.g., "1987", "1987-03", "1987-03-15", "1987?")
 - **JSON I/O** (`src/io.rs`): load/save from files, from_json/to_json for strings
 - **Search/Filter** (`src/filter.rs`): Filter by category, year range, text; search across all persons; chronological sorting
@@ -47,6 +47,13 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | `--with <ids>` / `-w` | add-fact | Comma-separated person IDs involved |
 | `--dry-run` | add-fact | Preview without saving to file |
 | `--propagate` | add-fact | Also create the fact for each person in `--with` (with cross-references) |
+| `--country <country>` | add-fact | Country where the event occurred |
+| `--city <city>` | add-fact | City where the event occurred (requires `--country`) |
+| `--lat <lat>` | add-fact | GPS latitude (requires `--country` and `--lon`) |
+| `--lon <lon>` | add-fact | GPS longitude (requires `--country` and `--lat`) |
+| `--attach <url>` | add-fact | Attachment URL (can be specified multiple times) |
+| `--attach-type <mime>` | add-fact | MIME content type for attachments |
+| `--attach-title <title>` | add-fact | Title/description for attachments |
 | `--dry-run` | merge | Preview changes without saving |
 | `--on-conflict <strategy>` | merge | How to handle category conflicts: `skip` (default), `overwrite`, `fail` |
 | `--duplicates <strategy>` | merge | How to handle duplicate facts: `skip` (default), `add` |
@@ -61,9 +68,12 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | Unknown category | Warning | Fact references undefined category |
 | Invalid date | Warning | Date doesn't match ISO 8601 format |
 | Unknown person ref | Warning | `with` field references unknown person |
+| Empty country | Warning | Location has empty country field |
+| Invalid GPS coordinates | Warning | Coordinates outside valid range (lat: -90..90, lon: -180..180) |
+| Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 22 unit tests + 1 doc test (all passing)
+- 30 unit tests + 1 doc test (all passing)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
 
 ### Example Data
@@ -108,6 +118,7 @@ anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
 chrono = "0.4"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3.15"
@@ -134,13 +145,41 @@ tempfile = "3.15"
           "date": "1990-05-15",
           "category": "education",
           "text": "Event description",
-          "with": ["bob"]  // optional: other person IDs
+          "with": ["bob"],
+          "location": {
+            "country": "France",
+            "city": "Paris",
+            "coordinates": { "lat": 48.8566, "lon": 2.3522 }
+          },
+          "attachments": [
+            {
+              "url": "file:///photos/event.jpg",
+              "content_type": "image/jpeg",
+              "title": "Event photo"
+            }
+          ]
         }
       ]
     }
   ]
 }
 ```
+
+### Location Object
+| Field | Required | Description |
+|-------|----------|-------------|
+| `country` | Yes | Country name or ISO code |
+| `city` | No | City name |
+| `coordinates` | No | GPS coordinates object |
+| `coordinates.lat` | Yes (if coordinates) | Latitude (-90 to 90) |
+| `coordinates.lon` | Yes (if coordinates) | Longitude (-180 to 180) |
+
+### Attachment Object
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | Yes | URL with scheme (file://, https://, s3://, etc.) |
+| `content_type` | No | MIME type (e.g., "image/jpeg", "application/pdf") |
+| `title` | No | Human-readable description |
 
 ### Date Formats
 | Format | Example | Meaning |
@@ -204,6 +243,12 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 
 # Add fact and propagate to all persons in --with
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-06-15 -c family -t "Family reunion" -w bob --propagate
+
+# Add fact with location
+./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-07 -c travel -t "Visited Paris" --country France --city Paris --lat 48.8566 --lon 2.3522
+
+# Add fact with attachments
+./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-08-20 -c family -t "Birthday party" --attach "file:///photos/birthday.jpg" --attach-type image/jpeg --attach-title "Birthday cake"
 
 # Merge chronicles
 ./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --dry-run

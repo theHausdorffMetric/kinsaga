@@ -55,7 +55,24 @@
           "date": "2018",
           "category": "travel",
           "text": "Trip to Japan",
-          "with": ["bob"]
+          "with": ["bob"],
+          "location": {
+            "country": "Japan",
+            "city": "Tokyo",
+            "coordinates": { "lat": 35.6762, "lon": 139.6503 }
+          },
+          "attachments": [
+            {
+              "url": "file:///photos/2018/tokyo-tower.jpg",
+              "content_type": "image/jpeg",
+              "title": "Tokyo Tower at sunset"
+            },
+            {
+              "url": "file:///photos/2018/shibuya.jpg",
+              "content_type": "image/jpeg",
+              "title": "Shibuya Crossing"
+            }
+          ]
         },
         {
           "id": "b8c9d0e1-f2a3-4567-1234-678901234567",
@@ -86,14 +103,30 @@
           "date": "2015",
           "category": "family",
           "text": "Married Alice",
-          "with": ["alice"]
+          "with": ["alice"],
+          "location": {
+            "country": "USA",
+            "city": "Springfield"
+          },
+          "attachments": [
+            {
+              "url": "s3://family-photos/wedding/ceremony.jpg",
+              "content_type": "image/jpeg",
+              "title": "Wedding ceremony"
+            }
+          ]
         },
         {
           "id": "f2a3b4c5-d6e7-8901-5678-012345678901",
           "date": "2018",
           "category": "travel",
           "text": "Trip to Japan",
-          "with": ["alice"]
+          "with": ["alice"],
+          "location": {
+            "country": "Japan",
+            "city": "Tokyo",
+            "coordinates": { "lat": 35.6762, "lon": 139.6503 }
+          }
         },
         {
           "id": "a3b4c5d6-e7f8-9012-6789-123456789012",

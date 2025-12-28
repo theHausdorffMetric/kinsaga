@@ -1,6 +1,7 @@
 //! Data model for family chronicles.
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 /// A family chronicle containing persons and their life events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +70,54 @@ pub struct Fact {
     /// Optional list of other person IDs involved in this event
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with: Option<Vec<String>>,
+
+    /// Optional location where the event occurred
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
+
+    /// Attachments (photos, documents, links)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+/// GPS coordinates.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Coordinates {
+    /// Latitude (-90.0 to 90.0)
+    pub lat: f64,
+
+    /// Longitude (-180.0 to 180.0)
+    pub lon: f64,
+}
+
+/// A geographic location.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Location {
+    /// Country name or ISO code (required)
+    pub country: String,
+
+    /// Optional city name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+
+    /// Optional GPS coordinates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coordinates: Option<Coordinates>,
+}
+
+/// An attachment (photo, document, link).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Attachment {
+    /// URL to the resource (file://, https://, s3://, etc.)
+    pub url: Url,
+
+    /// Optional MIME content type (e.g., "image/jpeg", "application/pdf")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+
+    /// Optional human-readable title/description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 impl Chronicle {
@@ -124,12 +173,90 @@ impl Fact {
             category: category.into(),
             text: text.into(),
             with: None,
+            location: None,
+            attachments: Vec::new(),
         }
     }
 
     /// Add persons involved in this event.
     pub fn with_persons(mut self, persons: Vec<String>) -> Self {
         self.with = Some(persons);
+        self
+    }
+
+    /// Set the location for this event.
+    pub fn with_location(mut self, location: Location) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    /// Add an attachment to this event.
+    pub fn with_attachment(mut self, attachment: Attachment) -> Self {
+        self.attachments.push(attachment);
+        self
+    }
+
+    /// Add multiple attachments to this event.
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> Self {
+        self.attachments.extend(attachments);
+        self
+    }
+}
+
+impl Coordinates {
+    /// Create new GPS coordinates.
+    pub fn new(lat: f64, lon: f64) -> Self {
+        Self { lat, lon }
+    }
+
+    /// Check if coordinates are valid (lat: -90..90, lon: -180..180).
+    pub fn is_valid(&self) -> bool {
+        (-90.0..=90.0).contains(&self.lat) && (-180.0..=180.0).contains(&self.lon)
+    }
+}
+
+impl Location {
+    /// Create a new location with just a country.
+    pub fn new(country: impl Into<String>) -> Self {
+        Self {
+            country: country.into(),
+            city: None,
+            coordinates: None,
+        }
+    }
+
+    /// Set the city.
+    pub fn with_city(mut self, city: impl Into<String>) -> Self {
+        self.city = Some(city.into());
+        self
+    }
+
+    /// Set GPS coordinates.
+    pub fn with_coordinates(mut self, coordinates: Coordinates) -> Self {
+        self.coordinates = Some(coordinates);
+        self
+    }
+}
+
+impl Attachment {
+    /// Create a new attachment with just a URL.
+    pub fn new(url: Url) -> Self {
+        Self {
+            url,
+            content_type: None,
+            title: None,
+        }
+    }
+
+    /// Set the MIME content type.
+    pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.content_type = Some(content_type.into());
+        self
+    }
+
+    /// Set the title/description.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
         self
     }
 }
@@ -219,5 +346,133 @@ mod tests {
 
         assert!(chronicle.find_person("alice").is_some());
         assert!(chronicle.find_person("unknown").is_none());
+    }
+
+    #[test]
+    fn test_coordinates_validation() {
+        // Valid coordinates
+        assert!(Coordinates::new(0.0, 0.0).is_valid());
+        assert!(Coordinates::new(90.0, 180.0).is_valid());
+        assert!(Coordinates::new(-90.0, -180.0).is_valid());
+        assert!(Coordinates::new(48.8566, 2.3522).is_valid()); // Paris
+
+        // Invalid coordinates
+        assert!(!Coordinates::new(91.0, 0.0).is_valid());
+        assert!(!Coordinates::new(-91.0, 0.0).is_valid());
+        assert!(!Coordinates::new(0.0, 181.0).is_valid());
+        assert!(!Coordinates::new(0.0, -181.0).is_valid());
+    }
+
+    #[test]
+    fn test_location_builder() {
+        let loc = Location::new("France")
+            .with_city("Paris")
+            .with_coordinates(Coordinates::new(48.8566, 2.3522));
+
+        assert_eq!(loc.country, "France");
+        assert_eq!(loc.city, Some("Paris".to_string()));
+        assert!(loc.coordinates.is_some());
+        let coords = loc.coordinates.unwrap();
+        assert!((coords.lat - 48.8566).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_attachment_builder() {
+        let url = Url::parse("https://example.com/photo.jpg").unwrap();
+        let att = Attachment::new(url)
+            .with_content_type("image/jpeg")
+            .with_title("Wedding photo");
+
+        assert_eq!(att.url.as_str(), "https://example.com/photo.jpg");
+        assert_eq!(att.content_type, Some("image/jpeg".to_string()));
+        assert_eq!(att.title, Some("Wedding photo".to_string()));
+    }
+
+    #[test]
+    fn test_fact_with_location_and_attachments() {
+        let url = Url::parse("file:///photos/wedding.jpg").unwrap();
+        let fact = Fact::new("uuid-1", "2020-06-15", "family", "Wedding day")
+            .with_location(Location::new("France").with_city("Paris"))
+            .with_attachment(Attachment::new(url).with_title("Wedding photo"));
+
+        assert!(fact.location.is_some());
+        assert_eq!(fact.location.as_ref().unwrap().country, "France");
+        assert_eq!(fact.attachments.len(), 1);
+        assert_eq!(fact.attachments[0].title, Some("Wedding photo".to_string()));
+    }
+
+    #[test]
+    fn test_serialize_fact_with_location() {
+        let fact = Fact::new("uuid-1", "2020-06-15", "travel", "Visited Eiffel Tower")
+            .with_location(
+                Location::new("France")
+                    .with_city("Paris")
+                    .with_coordinates(Coordinates::new(48.8584, 2.2945)),
+            );
+
+        let json = serde_json::to_string_pretty(&fact).unwrap();
+        assert!(json.contains("\"country\": \"France\""));
+        assert!(json.contains("\"city\": \"Paris\""));
+        assert!(json.contains("\"lat\": 48.8584"));
+    }
+
+    #[test]
+    fn test_serialize_fact_with_attachments() {
+        let url = Url::parse("s3://bucket/photos/eiffel.jpg").unwrap();
+        let fact = Fact::new("uuid-1", "2020-06-15", "travel", "Visited Eiffel Tower")
+            .with_attachment(
+                Attachment::new(url)
+                    .with_content_type("image/jpeg")
+                    .with_title("Eiffel Tower photo"),
+            );
+
+        let json = serde_json::to_string_pretty(&fact).unwrap();
+        assert!(json.contains("s3://bucket/photos/eiffel.jpg"));
+        assert!(json.contains("\"content_type\": \"image/jpeg\""));
+        assert!(json.contains("\"title\": \"Eiffel Tower photo\""));
+    }
+
+    #[test]
+    fn test_deserialize_fact_with_location_and_attachments() {
+        let json = r#"{
+            "id": "uuid-1",
+            "date": "2020-06-15",
+            "category": "travel",
+            "text": "Visited Eiffel Tower",
+            "location": {
+                "country": "France",
+                "city": "Paris",
+                "coordinates": { "lat": 48.8584, "lon": 2.2945 }
+            },
+            "attachments": [
+                {
+                    "url": "https://example.com/photo.jpg",
+                    "content_type": "image/jpeg",
+                    "title": "Eiffel Tower"
+                }
+            ]
+        }"#;
+
+        let fact: Fact = serde_json::from_str(json).unwrap();
+        assert!(fact.location.is_some());
+        let loc = fact.location.unwrap();
+        assert_eq!(loc.country, "France");
+        assert_eq!(loc.city, Some("Paris".to_string()));
+        assert!(loc.coordinates.is_some());
+
+        assert_eq!(fact.attachments.len(), 1);
+        assert_eq!(fact.attachments[0].url.as_str(), "https://example.com/photo.jpg");
+        assert_eq!(fact.attachments[0].content_type, Some("image/jpeg".to_string()));
+    }
+
+    #[test]
+    fn test_fact_without_optional_fields_serializes_cleanly() {
+        let fact = Fact::new("uuid-1", "2020-06-15", "family", "Simple event");
+        let json = serde_json::to_string(&fact).unwrap();
+
+        // Should not contain empty location or attachments
+        assert!(!json.contains("location"));
+        assert!(!json.contains("attachments"));
+        assert!(!json.contains("with"));
     }
 }

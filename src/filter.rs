@@ -76,10 +76,30 @@ impl FactFilter {
             }
         }
 
-        // Text filter (case-insensitive)
+        // Text filter (case-insensitive) - searches in text, location, and attachment titles
         if let Some(ref text) = self.text {
             let text_lower = text.to_lowercase();
-            if !fact.text.to_lowercase().contains(&text_lower) {
+
+            // Check main fact text
+            let in_text = fact.text.to_lowercase().contains(&text_lower);
+
+            // Check location (country and city)
+            let in_location = fact.location.as_ref().is_some_and(|loc| {
+                loc.country.to_lowercase().contains(&text_lower)
+                    || loc
+                        .city
+                        .as_ref()
+                        .is_some_and(|c| c.to_lowercase().contains(&text_lower))
+            });
+
+            // Check attachment titles
+            let in_attachments = fact.attachments.iter().any(|a| {
+                a.title
+                    .as_ref()
+                    .is_some_and(|t| t.to_lowercase().contains(&text_lower))
+            });
+
+            if !in_text && !in_location && !in_attachments {
                 return false;
             }
         }
