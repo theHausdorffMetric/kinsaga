@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-28
+**Last Updated:** 2025-12-29
 
 ## Overview
 
@@ -9,10 +9,28 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 ## Completed Features
 
 ### Core Library (`src/lib.rs`)
+
+The library is designed for reuse by different UI implementations (CLI, web, GUI).
+
 - **Data Model** (`src/model.rs`): Chronicle, Person, Fact, Category, Location, Coordinates, Attachment structs with serde serialization
 - **Date Parsing** (`src/date.rs`): ISO 8601 dates with optional `?` suffix for uncertainty (e.g., "1987", "1987-03", "1987-03-15", "1987?")
 - **JSON I/O** (`src/io.rs`): load/save from files, from_json/to_json for strings
 - **Search/Filter** (`src/filter.rs`): Filter by category, year range, text; search across all persons; chronological sorting
+- **Validation** (`src/validate.rs`): Chronicle validation with detailed issue reporting; UUID correction
+- **Merge** (`src/merge.rs`): Merge chronicles with conflict resolution strategies
+- **Facts** (`src/facts.rs`): Fact creation with validation, propagation to related persons, timeline collection
+- **Formatting** (`src/format.rs`): Display helpers for locations, attachments, dates, CSV escaping
+
+### Library API Highlights
+
+| Module | Key Functions | Description |
+|--------|---------------|-------------|
+| `validate` | `validate_chronicle()`, `correct_uuids()` | Validate chronicle structure, fix invalid UUIDs |
+| `merge` | `merge_chronicles()` | Merge two chronicles with configurable conflict handling |
+| `facts` | `add_fact()`, `collect_timeline_facts()` | Add facts with validation/propagation, gather timeline data |
+| `format` | `format_location()`, `format_attachment()` | Format data for display |
+| `filter` | `filter_facts()`, `search()` | Filter and search facts |
+| `io` | `load()`, `save()` | JSON file I/O |
 
 ### CLI (`src/main.rs`)
 
@@ -34,7 +52,7 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 #### Command Options
 | Option | Commands | Description |
 |--------|----------|-------------|
-| `--format <fmt>` / `-f` | list, timeline, search | Output format: `text` (default), `csv`, `md` |
+| `--format <fmt>` / `-f` | list, timeline, search | Output format: `text` (default), `csv`, `md`, `json` |
 | `--category <cat>` / `-c` | timeline | Filter by category |
 | `--from <year>` | timeline | Filter from year (inclusive) |
 | `--to <year>` | timeline | Filter to year (inclusive) |
@@ -73,7 +91,8 @@ Kinsaga is a family chronicle library and CLI for managing timestamped, categori
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 30 unit tests + 1 doc test (all passing)
+- 63 unit tests + 1 doc test (all passing)
+- Test coverage across all library modules
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
 
 ### Example Data
@@ -89,11 +108,15 @@ kinsaga/
 │   └── sample-chronicle.json
 └── src/
     ├── lib.rs              # Library exports
-    ├── main.rs             # CLI application
-    ├── model.rs            # Data structures
-    ├── date.rs             # Date parsing
-    ├── io.rs               # JSON I/O
-    └── filter.rs           # Search/filter logic
+    ├── main.rs             # CLI application (thin wrapper over library)
+    ├── model.rs            # Data structures (Chronicle, Person, Fact, etc.)
+    ├── date.rs             # Date parsing (ChronicleDate)
+    ├── io.rs               # JSON I/O (load, save)
+    ├── filter.rs           # Search/filter logic (FactFilter, search)
+    ├── validate.rs         # Validation (validate_chronicle, correct_uuids)
+    ├── merge.rs            # Merge operations (merge_chronicles)
+    ├── facts.rs            # Fact operations (add_fact, collect_timeline_facts)
+    └── format.rs           # Display formatting (format_location, escape_csv)
 ```
 
 ## Configuration
@@ -225,7 +248,9 @@ echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
 # Output formats
 ./target/release/kinsaga -i examples/sample-chronicle.json list -f csv
 ./target/release/kinsaga -i examples/sample-chronicle.json list -f md
+./target/release/kinsaga -i examples/sample-chronicle.json list -f json
 ./target/release/kinsaga -i examples/sample-chronicle.json timeline alice -f csv > alice.csv
+./target/release/kinsaga -i examples/sample-chronicle.json search "Tokyo" -f json
 
 # Validate and correct UUIDs (output to stdout)
 ./target/release/kinsaga -i examples/sample-chronicle.json validate --correct > corrected.json
@@ -268,6 +293,7 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 | Storage | Local JSON file |
 | Editing | `add-fact` command or text editor for manual edits |
 | Last updated | Auto-set to UTC timestamp on every save |
+| Library/CLI separation | All business logic in library modules; CLI only handles I/O and formatting |
 
 ## Privacy Note
 
