@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-30
+**Last Updated:** 2025-12-30 (Phase B planning documented)
 
 ## Overview
 
@@ -217,6 +217,39 @@ tempfile = "3.15"
 ## Phase B (Future Work)
 
 Not yet started. Planned features:
+
+### B1: Geocoding Integration
+
+Add `--geocode` flag to `add-fact` for automatic coordinate lookup.
+
+**Decision:** Use Nominatim (OpenStreetMap) as primary geocoding provider.
+
+| Considered | Decision | Reason |
+|------------|----------|--------|
+| Google Maps | No | Requires billing, restrictive terms |
+| Nominatim (OSM) | **Yes** | Free, open data, self-hostable, privacy-friendly |
+| Mapbox | Fallback option | Good quality, but requires account |
+
+**Planned implementation:**
+- New module: `src/geocode.rs`
+- Sync HTTP via `ureq` (lightweight, no async runtime needed)
+- New CLI flag: `--geocode "Eiffel Tower, Paris"` (conflicts with manual `--country/--lat/--lon`)
+- Returns structured Location with country, name, coordinates
+- Nominatim ToS: 1 req/sec rate limit, requires User-Agent header
+
+**Example usage:**
+```bash
+kinsaga add-fact alice -d 2024-07 -c travel -t "Visited Eiffel Tower" --geocode "Eiffel Tower, Paris"
+```
+
+### B2: Interactive Editing (TUI)
+
+Terminal-based editing with ratatui for:
+- Adding/editing facts with forms
+- Selecting from geocoding results
+- Browsing timeline interactively
+
+### B3: Web Interface
 
 1. **WASM Bindings** - Compile core library to WebAssembly
 2. **Web App** - Yew-based web interface for viewing/editing
