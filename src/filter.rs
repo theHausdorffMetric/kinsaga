@@ -83,13 +83,13 @@ impl FactFilter {
             // Check main fact text
             let in_text = fact.text.to_lowercase().contains(&text_lower);
 
-            // Check location (country and city)
+            // Check location (country and name)
             let in_location = fact.location.as_ref().is_some_and(|loc| {
                 loc.country.to_lowercase().contains(&text_lower)
                     || loc
-                        .city
+                        .name
                         .as_ref()
-                        .is_some_and(|c| c.to_lowercase().contains(&text_lower))
+                        .is_some_and(|n| n.to_lowercase().contains(&text_lower))
             });
 
             // Check attachment titles

@@ -309,14 +309,14 @@ pub fn collect_timeline_facts<'a>(
 /// Build a location from optional components.
 pub fn build_location(
     country: Option<String>,
-    city: Option<String>,
+    name: Option<String>,
     lat: Option<f64>,
     lon: Option<f64>,
 ) -> Result<Option<Location>, AddFactError> {
     if let Some(country_name) = country {
         let mut loc = Location::new(country_name);
-        if let Some(city_name) = city {
-            loc = loc.with_city(city_name);
+        if let Some(place_name) = name {
+            loc = loc.with_name(place_name);
         }
         if let (Some(lat_val), Some(lon_val)) = (lat, lon) {
             let coords = Coordinates::new(lat_val, lon_val);
@@ -478,7 +478,7 @@ mod tests {
             text: "Trip".to_string(),
             location: Some(
                 Location::new("France")
-                    .with_city("Paris")
+                    .with_name("Eiffel Tower, Paris")
                     .with_coordinates(Coordinates::new(48.8566, 2.3522)),
             ),
             ..Default::default()
@@ -524,7 +524,7 @@ mod tests {
         assert!(loc.is_some());
         let loc = loc.unwrap();
         assert_eq!(loc.country, "France");
-        assert_eq!(loc.city, Some("Paris".to_string()));
+        assert_eq!(loc.name, Some("Paris".to_string()));
         assert!(loc.coordinates.is_some());
     }
 

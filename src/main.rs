@@ -121,9 +121,9 @@ enum Commands {
         #[arg(long)]
         country: Option<String>,
 
-        /// City where the event occurred (optional, requires --country)
+        /// Place name: city, address, landmark, etc. (optional, requires --country)
         #[arg(long, requires = "country")]
-        city: Option<String>,
+        name: Option<String>,
 
         /// GPS latitude (optional, requires --country and --lon)
         #[arg(long, requires_all = ["country", "lon"], allow_hyphen_values = true)]
@@ -175,6 +175,9 @@ enum Commands {
         #[arg(long)]
         regenerate_uuids: bool,
     },
+
+    /// Print the JSON Schema for chronicle files
+    Schema,
 }
 
 /// Strategy for handling category/person conflicts during merge
@@ -208,6 +211,11 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Handle commands that don't require an input file
+    if let Commands::Schema = cli.command {
+        return cmd_schema();
+    }
+
     // Get file path from CLI arg, env var, or .env (clap handles the precedence)
     let input = cli.input.context(
         "No chronicle file specified. Use --input/-i, set KINSAGA_INPUT env var, or add KINSAGA_INPUT to .env",
@@ -232,7 +240,7 @@ fn main() -> Result<()> {
             text,
             with,
             country,
-            city,
+            name,
             lat,
             lon,
             attachments,
@@ -248,7 +256,7 @@ fn main() -> Result<()> {
             &text,
             with,
             country,
-            city,
+            name,
             lat,
             lon,
             attachments,
@@ -264,6 +272,7 @@ fn main() -> Result<()> {
             duplicates,
             regenerate_uuids,
         } => cmd_merge(&input, &source, dry_run, on_conflict, duplicates, regenerate_uuids),
+        Commands::Schema => unreachable!(), // Handled above
     }
 }
 
@@ -778,7 +787,7 @@ fn cmd_add_fact(
     text: &str,
     with: Option<Vec<String>>,
     country: Option<String>,
-    city: Option<String>,
+    name: Option<String>,
     lat: Option<f64>,
     lon: Option<f64>,
     attachments: Option<Vec<String>>,
@@ -796,7 +805,7 @@ fn cmd_add_fact(
         .unwrap_or_else(|| category_id.to_string());
 
     // Build location using library function
-    let location = build_location(country, city, lat, lon)
+    let location = build_location(country, name, lat, lon)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Build attachments using library function
@@ -1004,5 +1013,13 @@ fn cmd_merge(
         println!("{}", format!("✓ Saved to {}", target_file.display()).green());
     }
 
+    Ok(())
+}
+
+/// Embedded JSON Schema for chronicle files
+const CHRONICLE_SCHEMA: &str = include_str!("../schema.json");
+
+fn cmd_schema() -> Result<()> {
+    println!("{}", CHRONICLE_SCHEMA);
     Ok(())
 }

@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-29
+**Last Updated:** 2025-12-30
 
 ## Overview
 
@@ -48,6 +48,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `kinsaga validate` | Validate chronicle structure, references, and UUIDs |
 | `kinsaga add-fact <person>` | Add a new fact to a person's timeline |
 | `kinsaga merge <source>` | Merge another chronicle JSON file into the main chronicle |
+| `kinsaga schema` | Print JSON Schema for chronicle files (no input file required) |
 
 #### Command Options
 | Option | Commands | Description |
@@ -66,7 +67,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--dry-run` | add-fact | Preview without saving to file |
 | `--propagate` | add-fact | Also create the fact for each person in `--with` (with cross-references) |
 | `--country <country>` | add-fact | Country where the event occurred |
-| `--city <city>` | add-fact | City where the event occurred (requires `--country`) |
+| `--name <name>` | add-fact | Place name: city, address, landmark, etc. (requires `--country`) |
 | `--lat <lat>` | add-fact | GPS latitude (requires `--country` and `--lon`) |
 | `--lon <lon>` | add-fact | GPS longitude (requires `--country` and `--lat`) |
 | `--attach <url>` | add-fact | Attachment URL (can be specified multiple times) |
@@ -104,6 +105,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 kinsaga/
 ├── Cargo.toml              # Single crate with lib + bin
 ├── STATUS.md               # This file
+├── schema.json             # JSON Schema for chronicle files (embedded in CLI)
 ├── examples/
 │   └── sample-chronicle.json
 └── src/
@@ -171,7 +173,7 @@ tempfile = "3.15"
           "with": ["bob"],
           "location": {
             "country": "France",
-            "city": "Paris",
+            "name": "Eiffel Tower, Paris",
             "coordinates": { "lat": 48.8566, "lon": 2.3522 }
           },
           "attachments": [
@@ -192,7 +194,7 @@ tempfile = "3.15"
 | Field | Required | Description |
 |-------|----------|-------------|
 | `country` | Yes | Country name or ISO code |
-| `city` | No | City name |
+| `name` | No | Place name (city, address, landmark, venue, etc.) |
 | `coordinates` | No | GPS coordinates object |
 | `coordinates.lat` | Yes (if coordinates) | Latitude (-90 to 90) |
 | `coordinates.lon` | Yes (if coordinates) | Longitude (-180 to 180) |
@@ -270,7 +272,7 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-06-15 -c family -t "Family reunion" -w bob --propagate
 
 # Add fact with location
-./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-07 -c travel -t "Visited Paris" --country France --city Paris --lat 48.8566 --lon 2.3522
+./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-07 -c travel -t "Visited Paris" --country France --name Paris --lat 48.8566 --lon 2.3522
 
 # Add fact with attachments
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-08-20 -c family -t "Birthday party" --attach "file:///photos/birthday.jpg" --attach-type image/jpeg --attach-title "Birthday cake"
@@ -279,6 +281,10 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 ./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --dry-run
 ./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --on-conflict overwrite
 ./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --duplicates add --regenerate-uuids
+
+# Print JSON Schema (no input file required)
+./target/release/kinsaga schema
+./target/release/kinsaga schema > chronicle-schema.json
 ```
 
 ## Design Decisions
