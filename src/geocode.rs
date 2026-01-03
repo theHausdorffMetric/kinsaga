@@ -322,8 +322,7 @@ fn same_country(a: &str, b: &str) -> bool {
 pub fn fuzzy_match(a: &str, b: &str) -> bool {
     let normalize = |s: &str| {
         s.to_lowercase()
-            .replace('-', " ")
-            .replace('_', " ")
+            .replace(['-', '_'], " ")
             .trim()
             .to_string()
     };

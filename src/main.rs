@@ -1148,11 +1148,11 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                         // Find and update the fact
                         for person in &mut chronicle.persons {
                             for fact in &mut person.facts {
-                                if &fact.id == fact_id {
-                                    if let Some(ref mut location) = fact.location {
-                                        location.coordinates = Some(Coordinates::new(*lat, *lon));
-                                        applied += 1;
-                                    }
+                                if &fact.id == fact_id
+                                    && let Some(ref mut location) = fact.location
+                                {
+                                    location.coordinates = Some(Coordinates::new(*lat, *lon));
+                                    applied += 1;
                                 }
                             }
                         }
