@@ -456,6 +456,7 @@ dependencies = [
  "dotenvy",
  "env_logger",
  "log",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

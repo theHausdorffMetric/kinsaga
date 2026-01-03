@@ -4,11 +4,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use kinsaga::{
-    add_fact, build_attachments, build_location, collect_timeline_facts,
+    add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
     correct_uuids, escape_csv, format_attachment, format_date_display, format_location,
     load, merge_chronicles, save, search, validate_chronicle,
-    AddFactOptions, ChronicleDate, Fact, FactFilter, IssueType,
-    MergeOptions, ConflictStrategy as LibConflictStrategy, DuplicateStrategy as LibDuplicateStrategy,
+    AddFactOptions, AttachmentUpdate, ChronicleDate, EditFactOptions, Fact, FactFilter,
+    IssueType, LocationUpdate, MergeOptions, WithUpdate,
+    ConflictStrategy as LibConflictStrategy, DuplicateStrategy as LibDuplicateStrategy,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,6 +42,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// List all persons in the chronicle
     List {
@@ -77,12 +79,16 @@ enum Commands {
 
     /// Search for text across all persons
     Search {
-        /// Text to search for
+        /// Text to search for (or regex pattern with --regex)
         query: String,
 
         /// Output format
         #[arg(short, long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+
+        /// Treat query as a regex pattern
+        #[arg(short = 'r', long)]
+        regex: bool,
     },
 
     /// Validate a chronicle JSON file
@@ -123,7 +129,7 @@ enum Commands {
 
         /// Place name: city, address, landmark, etc. (optional, requires --country)
         #[arg(long, requires = "country")]
-        name: Option<String>,
+        place: Option<String>,
 
         /// GPS latitude (optional, requires --country and --lon)
         #[arg(long, requires_all = ["country", "lon"], allow_hyphen_values = true)]
@@ -174,6 +180,68 @@ enum Commands {
         /// Regenerate all UUIDs from source file (avoids collisions)
         #[arg(long)]
         regenerate_uuids: bool,
+    },
+
+    /// Edit an existing fact by UUID
+    EditFact {
+        /// UUID of the fact to edit
+        uuid: String,
+
+        /// New date (ISO 8601 format)
+        #[arg(short, long)]
+        date: Option<String>,
+
+        /// New category ID
+        #[arg(short, long)]
+        category: Option<String>,
+
+        /// New description text
+        #[arg(short, long)]
+        text: Option<String>,
+
+        /// Replace 'with' list (comma-separated person IDs)
+        #[arg(short, long, value_delimiter = ',')]
+        with: Option<Vec<String>>,
+
+        /// Clear all 'with' references
+        #[arg(long)]
+        clear_with: bool,
+
+        /// Set/update country
+        #[arg(long)]
+        country: Option<String>,
+
+        /// Set/update place name
+        #[arg(long)]
+        place: Option<String>,
+
+        /// Set/update GPS latitude
+        #[arg(long, allow_hyphen_values = true)]
+        lat: Option<f64>,
+
+        /// Set/update GPS longitude
+        #[arg(long, allow_hyphen_values = true)]
+        lon: Option<f64>,
+
+        /// Clear location entirely
+        #[arg(long)]
+        clear_location: bool,
+
+        /// Add attachment URL
+        #[arg(long = "add-attach", value_name = "URL")]
+        add_attachments: Option<Vec<String>>,
+
+        /// Remove attachment by URL
+        #[arg(long = "remove-attach", value_name = "URL")]
+        remove_attachments: Option<Vec<String>>,
+
+        /// Clear all attachments
+        #[arg(long)]
+        clear_attachments: bool,
+
+        /// Preview without saving
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Print the JSON Schema for chronicle files
@@ -231,7 +299,7 @@ fn main() -> Result<()> {
             to,
             include_shared,
         } => cmd_timeline(&input, &person, &format, category, from, to, include_shared),
-        Commands::Search { query, format } => cmd_search(&input, &query, &format),
+        Commands::Search { query, format, regex } => cmd_search(&input, &query, &format, regex),
         Commands::Validate { correct, in_place } => cmd_validate(&input, correct, in_place),
         Commands::AddFact {
             person,
@@ -240,7 +308,7 @@ fn main() -> Result<()> {
             text,
             with,
             country,
-            name,
+            place,
             lat,
             lon,
             attachments,
@@ -256,7 +324,7 @@ fn main() -> Result<()> {
             &text,
             with,
             country,
-            name,
+            place,
             lat,
             lon,
             attachments,
@@ -272,6 +340,40 @@ fn main() -> Result<()> {
             duplicates,
             regenerate_uuids,
         } => cmd_merge(&input, &source, dry_run, on_conflict, duplicates, regenerate_uuids),
+        Commands::EditFact {
+            uuid,
+            date,
+            category,
+            text,
+            with,
+            clear_with,
+            country,
+            place,
+            lat,
+            lon,
+            clear_location,
+            add_attachments,
+            remove_attachments,
+            clear_attachments,
+            dry_run,
+        } => cmd_edit_fact(
+            &input,
+            &uuid,
+            date,
+            category,
+            text,
+            with,
+            clear_with,
+            country,
+            place,
+            lat,
+            lon,
+            clear_location,
+            add_attachments,
+            remove_attachments,
+            clear_attachments,
+            dry_run,
+        ),
         Commands::Schema => unreachable!(), // Handled above
     }
 }
@@ -485,7 +587,7 @@ fn cmd_timeline(
                 let location_str = fact
                     .location
                     .as_ref()
-                    .map(|l| format_location(l))
+                    .map(format_location)
                     .unwrap_or_default();
                 let attachments_str: String = fact
                     .attachments
@@ -524,7 +626,7 @@ fn cmd_timeline(
                 let location_str = fact
                     .location
                     .as_ref()
-                    .map(|l| format_location(l))
+                    .map(format_location)
                     .unwrap_or_default();
                 let attachments_str: String = fact
                     .attachments
@@ -570,10 +672,10 @@ struct TimelineFactJson {
     shared_from: Option<String>,
 }
 
-fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat) -> Result<()> {
+fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: bool) -> Result<()> {
     let chronicle = load(file).context("Failed to load chronicle")?;
 
-    let filter = FactFilter::new().with_text(query);
+    let filter = FactFilter::new().with_text(query).with_regex(use_regex);
     let results = search(&chronicle, &filter);
 
     if results.is_empty() {
@@ -633,7 +735,7 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat) -> Result<()> 
                     .fact
                     .location
                     .as_ref()
-                    .map(|l| format_location(l))
+                    .map(format_location)
                     .unwrap_or_default();
                 let attachments_str: String = result
                     .fact
@@ -667,7 +769,7 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat) -> Result<()> 
                     .fact
                     .location
                     .as_ref()
-                    .map(|l| format_location(l))
+                    .map(format_location)
                     .unwrap_or_default();
                 let attachments_str: String = result
                     .fact
@@ -779,6 +881,7 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_add_fact(
     file: &PathBuf,
     person_id: &str,
@@ -787,7 +890,7 @@ fn cmd_add_fact(
     text: &str,
     with: Option<Vec<String>>,
     country: Option<String>,
-    name: Option<String>,
+    place: Option<String>,
     lat: Option<f64>,
     lon: Option<f64>,
     attachments: Option<Vec<String>>,
@@ -805,7 +908,7 @@ fn cmd_add_fact(
         .unwrap_or_else(|| category_id.to_string());
 
     // Build location using library function
-    let location = build_location(country, name, lat, lon)
+    let location = build_location(country, place, lat, lon)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Build attachments using library function
@@ -835,12 +938,12 @@ fn cmd_add_fact(
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Format location for display
-    let location_display = location.as_ref().map(|loc| format_location(loc));
+    let location_display = location.as_ref().map(format_location);
 
     // Format attachments for display
     let attachments_display: Vec<String> = parsed_attachments
         .iter()
-        .map(|a| format_attachment(a))
+        .map(format_attachment)
         .collect();
 
     if dry_run {
@@ -889,6 +992,182 @@ fn cmd_add_fact(
             }
             println!("    UUID: {}", uuid);
         }
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_edit_fact(
+    file: &PathBuf,
+    uuid: &str,
+    date: Option<String>,
+    category: Option<String>,
+    text: Option<String>,
+    with: Option<Vec<String>>,
+    clear_with: bool,
+    country: Option<String>,
+    place: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    clear_location: bool,
+    add_attachments: Option<Vec<String>>,
+    remove_attachments: Option<Vec<String>>,
+    clear_attachments: bool,
+    dry_run: bool,
+) -> Result<()> {
+    use kinsaga::{Attachment, Coordinates, Location, Url};
+
+    let mut chronicle = load(file).context("Failed to load chronicle")?;
+
+    // Build location update
+    let location_update = if clear_location {
+        Some(LocationUpdate::Clear)
+    } else if country.is_some() || place.is_some() || lat.is_some() || lon.is_some() {
+        // Build a new location from provided fields
+        // If we're updating, we need to get current location first for partial updates
+        let fact_location = chronicle
+            .persons
+            .iter()
+            .flat_map(|p| p.facts.iter())
+            .find(|f| f.id == uuid)
+            .and_then(|f| f.location.as_ref());
+
+        let base_country = country
+            .or_else(|| fact_location.map(|l| l.country.clone()))
+            .ok_or_else(|| anyhow::anyhow!("--country is required when setting location"))?;
+
+        let mut loc = Location::new(base_country);
+
+        // Use new place if provided, otherwise keep existing
+        if let Some(p) = place {
+            loc = loc.with_place(p);
+        } else if let Some(existing) = fact_location.and_then(|l| l.place.clone()) {
+            loc = loc.with_place(existing);
+        }
+
+        // Handle coordinates
+        if lat.is_some() || lon.is_some() {
+            let lat_val = lat
+                .or_else(|| fact_location.and_then(|l| l.coordinates.as_ref()).map(|c| c.lat))
+                .ok_or_else(|| anyhow::anyhow!("--lat is required with --lon"))?;
+            let lon_val = lon
+                .or_else(|| fact_location.and_then(|l| l.coordinates.as_ref()).map(|c| c.lon))
+                .ok_or_else(|| anyhow::anyhow!("--lon is required with --lat"))?;
+            loc = loc.with_coordinates(Coordinates::new(lat_val, lon_val));
+        } else if let Some(existing_coords) = fact_location.and_then(|l| l.coordinates.clone()) {
+            loc = loc.with_coordinates(existing_coords);
+        }
+
+        Some(LocationUpdate::Set(loc))
+    } else {
+        None
+    };
+
+    // Build with update
+    let with_update = if clear_with {
+        Some(WithUpdate::Clear)
+    } else {
+        with.map(WithUpdate::Replace)
+    };
+
+    // Build attachment update
+    let attachment_update = if clear_attachments {
+        Some(AttachmentUpdate::Clear)
+    } else if let Some(urls) = add_attachments {
+        let mut attachments = Vec::new();
+        for url_str in urls {
+            let url = Url::parse(&url_str).map_err(|_| {
+                anyhow::anyhow!(
+                    "Invalid URL '{}'. URLs must include a scheme (e.g., file://, https://)",
+                    url_str
+                )
+            })?;
+            attachments.push(Attachment::new(url));
+        }
+        Some(AttachmentUpdate::Add(attachments))
+    } else {
+        remove_attachments.map(AttachmentUpdate::Remove)
+    };
+
+    let options = EditFactOptions {
+        date: date.clone(),
+        category: category.clone(),
+        text: text.clone(),
+        with: with_update,
+        location: location_update,
+        attachments: attachment_update,
+    };
+
+    // Check if any updates were specified
+    if options.date.is_none()
+        && options.category.is_none()
+        && options.text.is_none()
+        && options.with.is_none()
+        && options.location.is_none()
+        && options.attachments.is_none()
+    {
+        anyhow::bail!("No changes specified. Use --date, --category, --text, --with, --country, --place, --lat, --lon, --add-attach, --remove-attach, or clear flags.");
+    }
+
+    let result = edit_fact(&mut chronicle, uuid, options).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // Get the updated fact for display
+    let updated_fact = chronicle
+        .persons
+        .iter()
+        .flat_map(|p| p.facts.iter())
+        .find(|f| f.id == uuid)
+        .unwrap();
+
+    let category_label = chronicle
+        .find_category(&updated_fact.category)
+        .map(|c| c.label.clone())
+        .unwrap_or_else(|| updated_fact.category.clone());
+
+    if dry_run {
+        println!("{}", "Dry run - not saving changes".yellow());
+        println!();
+        println!("Would update fact for {}:", result.person_name.bold());
+        println!(
+            "  {} {} [{}] {}",
+            "●".cyan(),
+            updated_fact.date,
+            category_label,
+            updated_fact.text
+        );
+        if let Some(ref loc) = updated_fact.location {
+            println!("  Location: {}", format_location(loc));
+        }
+        for att in &updated_fact.attachments {
+            println!("  Attachment: {}", format_attachment(att));
+        }
+        if let Some(ref with_ids) = updated_fact.with {
+            println!("  With: {}", with_ids.join(", "));
+        }
+        println!("  UUID: {}", uuid);
+    } else {
+        save(file, &chronicle).context("Failed to save chronicle")?;
+        println!("{}", "Fact updated successfully".green());
+        println!();
+        println!("{}:", result.person_name.bold());
+        println!(
+            "  {} {} [{}] {}",
+            "●".cyan(),
+            updated_fact.date,
+            category_label,
+            updated_fact.text
+        );
+        if let Some(ref loc) = updated_fact.location {
+            println!("  Location: {}", format_location(loc));
+        }
+        for att in &updated_fact.attachments {
+            println!("  Attachment: {}", format_attachment(att));
+        }
+        if let Some(ref with_ids) = updated_fact.with {
+            println!("  With: {}", with_ids.join(", "));
+        }
+        println!("  UUID: {}", uuid);
     }
 
     Ok(())

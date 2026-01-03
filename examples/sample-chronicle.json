@@ -58,7 +58,7 @@
           "with": ["bob"],
           "location": {
             "country": "Japan",
-            "name": "Tokyo",
+            "place": "Tokyo",
             "coordinates": { "lat": 35.6762, "lon": 139.6503 }
           },
           "attachments": [
@@ -106,7 +106,7 @@
           "with": ["alice"],
           "location": {
             "country": "USA",
-            "name": "Springfield"
+            "place": "Springfield"
           },
           "attachments": [
             {
@@ -124,7 +124,7 @@
           "with": ["alice"],
           "location": {
             "country": "Japan",
-            "name": "Tokyo",
+            "place": "Tokyo",
             "coordinates": { "lat": 35.6762, "lon": 139.6503 }
           }
         },

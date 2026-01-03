@@ -47,6 +47,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `kinsaga search <query>` | Search text across all persons |
 | `kinsaga validate` | Validate chronicle structure, references, and UUIDs |
 | `kinsaga add-fact <person>` | Add a new fact to a person's timeline |
+| `kinsaga edit-fact <uuid>` | Edit an existing fact by UUID |
 | `kinsaga merge <source>` | Merge another chronicle JSON file into the main chronicle |
 | `kinsaga schema` | Print JSON Schema for chronicle files (no input file required) |
 
@@ -54,6 +55,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Option | Commands | Description |
 |--------|----------|-------------|
 | `--format <fmt>` / `-f` | list, timeline, search | Output format: `text` (default), `csv`, `md`, `json` |
+| `--regex` / `-r` | search | Treat query as a regex pattern (case-insensitive) |
 | `--category <cat>` / `-c` | timeline | Filter by category |
 | `--from <year>` | timeline | Filter from year (inclusive) |
 | `--to <year>` | timeline | Filter to year (inclusive) |
@@ -67,7 +69,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--dry-run` | add-fact | Preview without saving to file |
 | `--propagate` | add-fact | Also create the fact for each person in `--with` (with cross-references) |
 | `--country <country>` | add-fact | Country where the event occurred |
-| `--name <name>` | add-fact | Place name: city, address, landmark, etc. (requires `--country`) |
+| `--place <place>` | add-fact | Place name: city, address, landmark, etc. (requires `--country`) |
 | `--lat <lat>` | add-fact | GPS latitude (requires `--country` and `--lon`) |
 | `--lon <lon>` | add-fact | GPS longitude (requires `--country` and `--lat`) |
 | `--attach <url>` | add-fact | Attachment URL (can be specified multiple times) |
@@ -77,6 +79,20 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--on-conflict <strategy>` | merge | How to handle category conflicts: `skip` (default), `overwrite`, `fail` |
 | `--duplicates <strategy>` | merge | How to handle duplicate facts: `skip` (default), `add` |
 | `--regenerate-uuids` | merge | Generate new UUIDs for all merged facts |
+| `--date <date>` / `-d` | edit-fact | New date (ISO 8601) |
+| `--category <cat>` / `-c` | edit-fact | New category ID |
+| `--text <text>` / `-t` | edit-fact | New description text |
+| `--with <ids>` / `-w` | edit-fact | Replace 'with' list (comma-separated) |
+| `--clear-with` | edit-fact | Clear all 'with' references |
+| `--country <country>` | edit-fact | Set/update country |
+| `--place <place>` | edit-fact | Set/update place name |
+| `--lat <lat>` | edit-fact | Set/update GPS latitude |
+| `--lon <lon>` | edit-fact | Set/update GPS longitude |
+| `--clear-location` | edit-fact | Clear location entirely |
+| `--add-attach <url>` | edit-fact | Add attachment URL |
+| `--remove-attach <url>` | edit-fact | Remove attachment by URL |
+| `--clear-attachments` | edit-fact | Clear all attachments |
+| `--dry-run` | edit-fact | Preview without saving |
 
 #### Validation Checks
 | Check | Level | Description |
@@ -92,7 +108,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 63 unit tests + 1 doc test (all passing)
+- 76 unit tests + 1 doc test (all passing)
 - Test coverage across all library modules
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
 
@@ -173,7 +189,7 @@ tempfile = "3.15"
           "with": ["bob"],
           "location": {
             "country": "France",
-            "name": "Eiffel Tower, Paris",
+            "place": "Eiffel Tower, Paris",
             "coordinates": { "lat": 48.8566, "lon": 2.3522 }
           },
           "attachments": [
@@ -194,7 +210,7 @@ tempfile = "3.15"
 | Field | Required | Description |
 |-------|----------|-------------|
 | `country` | Yes | Country name or ISO code |
-| `name` | No | Place name (city, address, landmark, venue, etc.) |
+| `place` | No | Place name (city, address, landmark, venue, etc.) |
 | `coordinates` | No | GPS coordinates object |
 | `coordinates.lat` | Yes (if coordinates) | Latitude (-90 to 90) |
 | `coordinates.lon` | Yes (if coordinates) | Longitude (-180 to 180) |
@@ -234,7 +250,7 @@ Add `--geocode` flag to `add-fact` for automatic coordinate lookup.
 - New module: `src/geocode.rs`
 - Sync HTTP via `ureq` (lightweight, no async runtime needed)
 - New CLI flag: `--geocode "Eiffel Tower, Paris"` (conflicts with manual `--country/--lat/--lon`)
-- Returns structured Location with country, name, coordinates
+- Returns structured Location with country, place, coordinates
 - Nominatim ToS: 1 req/sec rate limit, requires User-Agent header
 
 **Example usage:**
@@ -269,6 +285,7 @@ cargo test
 ./target/release/kinsaga -i examples/sample-chronicle.json list
 ./target/release/kinsaga -i examples/sample-chronicle.json timeline alice
 ./target/release/kinsaga -i examples/sample-chronicle.json search "Springfield"
+./target/release/kinsaga -i examples/sample-chronicle.json search "Springfield|Shelbyville" --regex
 ./target/release/kinsaga -i examples/sample-chronicle.json validate
 
 # Or set environment variable
@@ -305,10 +322,16 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-06-15 -c family -t "Family reunion" -w bob --propagate
 
 # Add fact with location
-./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-07 -c travel -t "Visited Paris" --country France --name Paris --lat 48.8566 --lon 2.3522
+./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-07 -c travel -t "Visited Paris" --country France --place Paris --lat 48.8566 --lon 2.3522
 
 # Add fact with attachments
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2024-08-20 -c family -t "Birthday party" --attach "file:///photos/birthday.jpg" --attach-type image/jpeg --attach-title "Birthday cake"
+
+# Edit existing fact (by UUID)
+./target/release/kinsaga -i examples/sample-chronicle.json edit-fact a7b8c9d0-e1f2-3456-0123-567890123456 --text "Amazing trip to Japan" --dry-run
+./target/release/kinsaga -i examples/sample-chronicle.json edit-fact a7b8c9d0-e1f2-3456-0123-567890123456 --date 2018-03 --place "Kyoto"
+./target/release/kinsaga -i examples/sample-chronicle.json edit-fact a7b8c9d0-e1f2-3456-0123-567890123456 --clear-location
+./target/release/kinsaga -i examples/sample-chronicle.json edit-fact a7b8c9d0-e1f2-3456-0123-567890123456 --add-attach "file:///photos/2018/mt-fuji.jpg"
 
 # Merge chronicles
 ./target/release/kinsaga -i examples/sample-chronicle.json merge other-chronicle.json --dry-run

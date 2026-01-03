@@ -43,7 +43,11 @@ pub mod model;
 pub mod validate;
 
 pub use date::ChronicleDate;
-pub use facts::{add_fact, build_attachments, build_location, collect_timeline_facts, AddFactOptions, AddFactResult, TimelineFact};
+pub use facts::{
+    add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
+    AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions, EditFactResult,
+    LocationUpdate, TimelineFact, WithUpdate,
+};
 pub use filter::{filter_facts, search, FactFilter, SearchResult};
 pub use format::{escape_csv, format_attachment, format_attachment_markdown, format_date_display, format_location, truncate_text};
 pub use io::{load, save};

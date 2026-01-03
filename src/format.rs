@@ -7,8 +7,8 @@ use crate::{Attachment, Location};
 /// Returns a string like "Paris, France" or "Eiffel Tower, France, (48.8566, 2.3522)".
 pub fn format_location(location: &Location) -> String {
     let mut parts = Vec::new();
-    if let Some(ref name) = location.name {
-        parts.push(name.clone());
+    if let Some(ref place) = location.place {
+        parts.push(place.clone());
     }
     parts.push(location.country.clone());
     if let Some(ref coords) = location.coordinates {
@@ -80,15 +80,15 @@ mod tests {
     }
 
     #[test]
-    fn test_format_location_with_name() {
-        let loc = Location::new("France").with_name("Paris");
+    fn test_format_location_with_place() {
+        let loc = Location::new("France").with_place("Paris");
         assert_eq!(format_location(&loc), "Paris, France");
     }
 
     #[test]
     fn test_format_location_with_coords() {
         let loc = Location::new("France")
-            .with_name("Eiffel Tower, Paris")
+            .with_place("Eiffel Tower, Paris")
             .with_coordinates(Coordinates::new(48.8566, 2.3522));
         assert_eq!(format_location(&loc), "Eiffel Tower, Paris, France, (48.8566, 2.3522)");
     }

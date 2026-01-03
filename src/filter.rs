@@ -2,6 +2,7 @@
 
 use crate::date::ChronicleDate;
 use crate::{Chronicle, Fact, Person};
+use regex::Regex;
 
 /// A filter for querying facts.
 #[derive(Debug, Default, Clone)]
@@ -15,8 +16,11 @@ pub struct FactFilter {
     /// Filter by maximum year (inclusive)
     pub to_year: Option<u16>,
 
-    /// Filter by text content (case-insensitive substring match)
+    /// Filter by text content (case-insensitive substring match, or regex if enabled)
     pub text: Option<String>,
+
+    /// If true, treat text as a regex pattern
+    pub use_regex: bool,
 }
 
 impl FactFilter {
@@ -49,57 +53,69 @@ impl FactFilter {
         self
     }
 
+    /// Enable regex mode for text matching.
+    pub fn with_regex(mut self, enabled: bool) -> Self {
+        self.use_regex = enabled;
+        self
+    }
+
     /// Check if a fact matches this filter.
     pub fn matches(&self, fact: &Fact) -> bool {
         // Category filter
-        if let Some(ref cat) = self.category {
-            if &fact.category != cat {
+        if let Some(ref cat) = self.category
+            && &fact.category != cat
+        {
+            return false;
+        }
+
+        // Parse the date for year filtering
+        if (self.from_year.is_some() || self.to_year.is_some())
+            && let Ok(date) = ChronicleDate::parse(&fact.date)
+            && let Some(year) = date.year
+        {
+            if let Some(from) = self.from_year
+                && year < from
+            {
+                return false;
+            }
+            if let Some(to) = self.to_year
+                && year > to
+            {
                 return false;
             }
         }
 
-        // Parse the date for year filtering
-        if self.from_year.is_some() || self.to_year.is_some() {
-            if let Ok(date) = ChronicleDate::parse(&fact.date) {
-                if let Some(year) = date.year {
-                    if let Some(from) = self.from_year {
-                        if year < from {
-                            return false;
-                        }
-                    }
-                    if let Some(to) = self.to_year {
-                        if year > to {
-                            return false;
-                        }
-                    }
+        // Text filter (case-insensitive) - searches across all text fields combined
+        // This allows regex patterns to match across fields (e.g., "foo.*bar" matches
+        // if "foo" is in text and "bar" is in location)
+        if let Some(ref pattern) = self.text {
+            // Build combined searchable text from all fields
+            let mut combined = fact.text.clone();
+            if let Some(ref loc) = fact.location {
+                combined.push(' ');
+                combined.push_str(&loc.country);
+                if let Some(ref place) = loc.place {
+                    combined.push(' ');
+                    combined.push_str(place);
                 }
             }
-        }
+            for attachment in &fact.attachments {
+                if let Some(ref title) = attachment.title {
+                    combined.push(' ');
+                    combined.push_str(title);
+                }
+            }
 
-        // Text filter (case-insensitive) - searches in text, location, and attachment titles
-        if let Some(ref text) = self.text {
-            let text_lower = text.to_lowercase();
+            let matches = if self.use_regex {
+                let regex_pattern = format!("(?i){}", pattern);
+                Regex::new(&regex_pattern)
+                    .map(|re| re.is_match(&combined))
+                    .unwrap_or(false)
+            } else {
+                combined.to_lowercase().contains(&pattern.to_lowercase())
+            };
 
-            // Check main fact text
-            let in_text = fact.text.to_lowercase().contains(&text_lower);
-
-            // Check location (country and name)
-            let in_location = fact.location.as_ref().is_some_and(|loc| {
-                loc.country.to_lowercase().contains(&text_lower)
-                    || loc
-                        .name
-                        .as_ref()
-                        .is_some_and(|n| n.to_lowercase().contains(&text_lower))
-            });
-
-            // Check attachment titles
-            let in_attachments = fact.attachments.iter().any(|a| {
-                a.title
-                    .as_ref()
-                    .is_some_and(|t| t.to_lowercase().contains(&text_lower))
-            });
-
-            if !in_text && !in_location && !in_attachments {
+            if !matches {
                 return false;
             }
         }
@@ -271,5 +287,85 @@ mod tests {
         assert_eq!(facts[1].date, "2001");
         assert_eq!(facts[2].date, "2008");
         assert_eq!(facts[3].date, "2015");
+    }
+
+    #[test]
+    fn test_regex_or_pattern() {
+        let chronicle = sample_chronicle();
+        // Match "Springfield" OR "Shelbyville" using regex OR
+        let filter = FactFilter::new()
+            .with_text("springfield|shelbyville")
+            .with_regex(true);
+
+        let results = search(&chronicle, &filter);
+        assert_eq!(results.len(), 2); // One from Alice, one from Bob
+    }
+
+    #[test]
+    fn test_regex_case_insensitive() {
+        let chronicle = sample_chronicle();
+        // Regex should be case-insensitive
+        let filter = FactFilter::new()
+            .with_text("SPRINGFIELD")
+            .with_regex(true);
+
+        let results = search(&chronicle, &filter);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_regex_word_boundary() {
+        let chronicle = sample_chronicle();
+        // Match "New" as word start
+        let filter = FactFilter::new()
+            .with_text(r"\bNew\b")
+            .with_regex(true);
+
+        let results = search(&chronicle, &filter);
+        assert_eq!(results.len(), 2); // "New York" appears twice
+    }
+
+    #[test]
+    fn test_regex_invalid_pattern() {
+        let chronicle = sample_chronicle();
+        // Invalid regex should match nothing
+        let filter = FactFilter::new()
+            .with_text("[invalid")
+            .with_regex(true);
+
+        let results = search(&chronicle, &filter);
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_regex_cross_field_matching() {
+        use crate::Location;
+
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("travel", "Travel"));
+
+        let mut alice = Person::new("alice", "Alice");
+        let mut fact = Fact::new("1", "2024", "travel", "Hiking with Smilla");
+        fact.location = Some(Location::new("Switzerland").with_place("Mettmenalp"));
+        alice.facts.push(fact);
+        chronicle.persons.push(alice);
+
+        // Match "Smilla" in text AND "Mettmen" in location using regex
+        let filter = FactFilter::new()
+            .with_text("smilla.*mettmen|mettmen.*smilla")
+            .with_regex(true);
+
+        let results = search(&chronicle, &filter);
+        assert_eq!(results.len(), 1);
+
+        // Single term still works
+        let filter2 = FactFilter::new().with_text("smilla");
+        assert_eq!(search(&chronicle, &filter2).len(), 1);
+
+        // Non-matching cross-field
+        let filter3 = FactFilter::new()
+            .with_text("smilla.*zurich")
+            .with_regex(true);
+        assert_eq!(search(&chronicle, &filter3).len(), 0);
     }
 }

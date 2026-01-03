@@ -147,7 +147,7 @@
           "minLength": 1,
           "examples": ["France", "USA", "DE"]
         },
-        "name": {
+        "place": {
           "type": "string",
           "description": "Place name (city, address, landmark, venue, etc.)",
           "examples": ["Paris", "Rifugio Auronzo", "123 Main Street, Springfield", "Eiffel Tower"]

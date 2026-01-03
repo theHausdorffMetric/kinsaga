@@ -155,35 +155,35 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                     });
                 }
 
-                if let Some(ref coords) = location.coordinates {
-                    if !coords.is_valid() {
-                        result.warnings.push(ValidationIssue {
-                            person_id: person.id.clone(),
-                            fact_id: Some(fact.id.clone()),
-                            message: format!(
-                                "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
-                                coords.lat, coords.lon
-                            ),
-                            issue_type: IssueType::InvalidCoordinates,
-                        });
-                    }
+                if let Some(ref coords) = location.coordinates
+                    && !coords.is_valid()
+                {
+                    result.warnings.push(ValidationIssue {
+                        person_id: person.id.clone(),
+                        fact_id: Some(fact.id.clone()),
+                        message: format!(
+                            "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
+                            coords.lat, coords.lon
+                        ),
+                        issue_type: IssueType::InvalidCoordinates,
+                    });
                 }
             }
 
             // Attachments validation
             for (i, attachment) in fact.attachments.iter().enumerate() {
-                if let Some(ref content_type) = attachment.content_type {
-                    if !is_valid_mime_type(content_type) {
-                        result.warnings.push(ValidationIssue {
-                            person_id: person.id.clone(),
-                            fact_id: Some(fact.id.clone()),
-                            message: format!(
-                                "Attachment {}: invalid MIME type '{}' (expected format: type/subtype)",
-                                i + 1, content_type
-                            ),
-                            issue_type: IssueType::InvalidMimeType,
-                        });
-                    }
+                if let Some(ref content_type) = attachment.content_type
+                    && !is_valid_mime_type(content_type)
+                {
+                    result.warnings.push(ValidationIssue {
+                        person_id: person.id.clone(),
+                        fact_id: Some(fact.id.clone()),
+                        message: format!(
+                            "Attachment {}: invalid MIME type '{}' (expected format: type/subtype)",
+                            i + 1, content_type
+                        ),
+                        issue_type: IssueType::InvalidMimeType,
+                    });
                 }
             }
         }

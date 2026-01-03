@@ -76,8 +76,8 @@ impl FromStr for ChronicleDate {
         let raw = s.to_string();
 
         // Check for uncertainty marker
-        let (date_part, uncertain) = if s.ends_with('?') {
-            (&s[..s.len() - 1], true)
+        let (date_part, uncertain) = if let Some(stripped) = s.strip_suffix('?') {
+            (stripped, true)
         } else {
             (s, false)
         };

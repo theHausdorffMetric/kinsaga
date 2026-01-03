@@ -97,8 +97,8 @@ pub struct Location {
     pub country: String,
 
     /// Optional place name (city, address, landmark, venue, etc.)
-    #[serde(skip_serializing_if = "Option::is_none", alias = "city")]
-    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
 
     /// Optional GPS coordinates
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,14 +220,14 @@ impl Location {
     pub fn new(country: impl Into<String>) -> Self {
         Self {
             country: country.into(),
-            name: None,
+            place: None,
             coordinates: None,
         }
     }
 
     /// Set the place name (city, address, landmark, etc.).
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
+    pub fn with_place(mut self, place: impl Into<String>) -> Self {
+        self.place = Some(place.into());
         self
     }
 
@@ -366,11 +366,11 @@ mod tests {
     #[test]
     fn test_location_builder() {
         let loc = Location::new("France")
-            .with_name("Paris")
+            .with_place("Paris")
             .with_coordinates(Coordinates::new(48.8566, 2.3522));
 
         assert_eq!(loc.country, "France");
-        assert_eq!(loc.name, Some("Paris".to_string()));
+        assert_eq!(loc.place, Some("Paris".to_string()));
         assert!(loc.coordinates.is_some());
         let coords = loc.coordinates.unwrap();
         assert!((coords.lat - 48.8566).abs() < 0.0001);
@@ -392,7 +392,7 @@ mod tests {
     fn test_fact_with_location_and_attachments() {
         let url = Url::parse("file:///photos/wedding.jpg").unwrap();
         let fact = Fact::new("uuid-1", "2020-06-15", "family", "Wedding day")
-            .with_location(Location::new("France").with_name("Paris"))
+            .with_location(Location::new("France").with_place("Paris"))
             .with_attachment(Attachment::new(url).with_title("Wedding photo"));
 
         assert!(fact.location.is_some());
@@ -406,13 +406,13 @@ mod tests {
         let fact = Fact::new("uuid-1", "2020-06-15", "travel", "Visited Eiffel Tower")
             .with_location(
                 Location::new("France")
-                    .with_name("Eiffel Tower, Paris")
+                    .with_place("Eiffel Tower, Paris")
                     .with_coordinates(Coordinates::new(48.8584, 2.2945)),
             );
 
         let json = serde_json::to_string_pretty(&fact).unwrap();
         assert!(json.contains("\"country\": \"France\""));
-        assert!(json.contains("\"name\": \"Eiffel Tower, Paris\""));
+        assert!(json.contains("\"place\": \"Eiffel Tower, Paris\""));
         assert!(json.contains("\"lat\": 48.8584"));
     }
 
@@ -434,7 +434,6 @@ mod tests {
 
     #[test]
     fn test_deserialize_fact_with_location_and_attachments() {
-        // Test with "name" field
         let json = r#"{
             "id": "uuid-1",
             "date": "2020-06-15",
@@ -442,7 +441,7 @@ mod tests {
             "text": "Visited Eiffel Tower",
             "location": {
                 "country": "France",
-                "name": "Eiffel Tower, Paris",
+                "place": "Eiffel Tower, Paris",
                 "coordinates": { "lat": 48.8584, "lon": 2.2945 }
             },
             "attachments": [
@@ -458,27 +457,12 @@ mod tests {
         assert!(fact.location.is_some());
         let loc = fact.location.unwrap();
         assert_eq!(loc.country, "France");
-        assert_eq!(loc.name, Some("Eiffel Tower, Paris".to_string()));
+        assert_eq!(loc.place, Some("Eiffel Tower, Paris".to_string()));
         assert!(loc.coordinates.is_some());
 
         assert_eq!(fact.attachments.len(), 1);
         assert_eq!(fact.attachments[0].url.as_str(), "https://example.com/photo.jpg");
         assert_eq!(fact.attachments[0].content_type, Some("image/jpeg".to_string()));
-
-        // Test backward compatibility with "city" alias
-        let json_with_city = r#"{
-            "id": "uuid-2",
-            "date": "2020-06-15",
-            "category": "travel",
-            "text": "Another visit",
-            "location": {
-                "country": "France",
-                "city": "Paris"
-            }
-        }"#;
-
-        let fact2: Fact = serde_json::from_str(json_with_city).unwrap();
-        assert_eq!(fact2.location.unwrap().name, Some("Paris".to_string()));
     }
 
     #[test]
