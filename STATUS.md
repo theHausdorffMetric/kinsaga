@@ -1,10 +1,10 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2025-12-30 (Phase B planning documented)
+**Last Updated:** 2026-01-03 (GPS validation implemented)
 
 ## Overview
 
-Kinsaga is a family chronicle library and CLI for managing timestamped, categorized life events. The Phase A MVP (Library + CLI) is complete.
+Kinsaga is a family chronicle library and CLI for managing timestamped, categorized life events. Phase A MVP (Library + CLI) and Phase B1 (GPS validation via Nominatim) are complete.
 
 ## Completed Features
 
@@ -20,6 +20,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 - **Merge** (`src/merge.rs`): Merge chronicles with conflict resolution strategies
 - **Facts** (`src/facts.rs`): Fact creation with validation, propagation to related persons, timeline collection
 - **Formatting** (`src/format.rs`): Display helpers for locations, attachments, dates, CSV escaping
+- **Geocoding** (`src/geocode.rs`): Nominatim integration for GPS validation and coordinate lookup
 
 ### Library API Highlights
 
@@ -31,6 +32,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `format` | `format_location()`, `format_attachment()` | Format data for display |
 | `filter` | `filter_facts()`, `search()` | Filter and search facts |
 | `io` | `load()`, `save()` | JSON file I/O |
+| `geocode` | `NominatimClient`, `fuzzy_match()` | GPS validation and forward/reverse geocoding |
 
 ### CLI (`src/main.rs`)
 
@@ -62,6 +64,9 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--include-shared` | timeline | Include facts from others where this person is in their `with` field |
 | `--correct` | validate | Generate valid UUIDs for invalid/missing/duplicate and output JSON to stdout |
 | `--in-place` | validate | Write corrected JSON back to the input file (requires `--correct`) |
+| `--gps` | validate | Validate GPS coordinates against Nominatim (reverse geocoding) |
+| `--suggest` | validate | Suggest GPS coordinates for locations without them (requires `--gps`) |
+| `--apply` | validate | Apply suggested GPS coordinates to the chronicle (requires `--suggest`) |
 | `--date <date>` / `-d` | add-fact | Date (ISO 8601, required) |
 | `--category <cat>` / `-c` | add-fact | Category ID (required) |
 | `--text <text>` / `-t` | add-fact | Event description (required) |
@@ -108,7 +113,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 76 unit tests + 1 doc test (all passing)
+- 87 unit tests + 1 doc test (all passing)
 - Test coverage across all library modules
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
 
@@ -134,7 +139,8 @@ kinsaga/
     ├── validate.rs         # Validation (validate_chronicle, correct_uuids)
     ├── merge.rs            # Merge operations (merge_chronicles)
     ├── facts.rs            # Fact operations (add_fact, collect_timeline_facts)
-    └── format.rs           # Display formatting (format_location, escape_csv)
+    ├── format.rs           # Display formatting (format_location, escape_csv)
+    └── geocode.rs          # Nominatim geocoding (NominatimClient, fuzzy_match)
 ```
 
 ## Configuration
@@ -150,19 +156,22 @@ kinsaga/
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
-uuid = { version = "1.0", features = ["v4"] }
-clap = { version = "4.4", features = ["derive", "env"] }
+thiserror = "2.0"
+uuid = { version = "1.19", features = ["v4"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 dotenvy = "0.15"
-colored = "2.1"
+colored = "3.0"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
 chrono = "0.4"
 url = "2.5"
+regex = "1.12"
+ureq = "3.0"
+urlencoding = "2.1"
 
 [dev-dependencies]
-tempfile = "3.15"
+tempfile = "3.24"
 ```
 
 ## Schema Design
@@ -230,32 +239,49 @@ tempfile = "3.15"
 | Full date | `1987-03-15` | March 15, 1987 |
 | Uncertain | `1987?` | Approximately 1987 |
 
-## Phase B (Future Work)
+## Phase B (Geocoding & Future Work)
 
-Not yet started. Planned features:
+### B1: GPS Validation (Completed)
 
-### B1: Geocoding Integration
+GPS validation via Nominatim (OpenStreetMap) is now implemented.
 
-Add `--geocode` flag to `add-fact` for automatic coordinate lookup.
+**Features:**
+- Reverse geocoding: Validate existing GPS coordinates against stored country/place
+- Forward geocoding: Suggest coordinates for locations without GPS
+- Apply suggestions: Automatically add top-ranked coordinates to chronicle
+- ISO country code matching: CH↔Switzerland/Schweiz, JP↔Japan/日本, etc.
+- Rate limiting: 1 request/second per Nominatim ToS
 
-**Decision:** Use Nominatim (OpenStreetMap) as primary geocoding provider.
-
-| Considered | Decision | Reason |
-|------------|----------|--------|
-| Google Maps | No | Requires billing, restrictive terms |
-| Nominatim (OSM) | **Yes** | Free, open data, self-hostable, privacy-friendly |
-| Mapbox | Fallback option | Good quality, but requires account |
-
-**Planned implementation:**
+**Implementation:**
 - New module: `src/geocode.rs`
 - Sync HTTP via `ureq` (lightweight, no async runtime needed)
-- New CLI flag: `--geocode "Eiffel Tower, Paris"` (conflicts with manual `--country/--lat/--lon`)
-- Returns structured Location with country, place, coordinates
-- Nominatim ToS: 1 req/sec rate limit, requires User-Agent header
+- `NominatimClient` with `reverse_geocode()` and `forward_geocode()` methods
+- `fuzzy_match()` for country/place name comparison with ISO code support
+
+**CLI flags:**
+| Flag | Description |
+|------|-------------|
+| `--gps` | Validate existing GPS coordinates via reverse geocoding |
+| `--gps --suggest` | Also suggest coordinates for locations without GPS |
+| `--gps --suggest --apply` | Apply top suggestions and output JSON to stdout |
+| `--gps --suggest --apply --in-place` | Apply top suggestions and save to file |
 
 **Example usage:**
 ```bash
-kinsaga add-fact alice -d 2024-07 -c travel -t "Visited Eiffel Tower" --geocode "Eiffel Tower, Paris"
+# Validate existing GPS coordinates
+kinsaga validate --gps
+
+# Suggest coordinates for locations without GPS
+kinsaga validate --gps --suggest
+
+# Apply top suggestions (preview - outputs JSON to stdout)
+kinsaga validate --gps --suggest --apply
+
+# Apply top suggestions and save to file
+kinsaga validate --gps --suggest --apply --in-place
+
+# Redirect to new file
+kinsaga validate --gps --suggest --apply > updated-chronicle.json
 ```
 
 ### B2: Interactive Editing (TUI)
@@ -341,6 +367,11 @@ RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validat
 # Print JSON Schema (no input file required)
 ./target/release/kinsaga schema
 ./target/release/kinsaga schema > chronicle-schema.json
+
+# GPS validation (requires network access, rate-limited to 1 req/sec)
+./target/release/kinsaga -i examples/sample-chronicle.json validate --gps
+./target/release/kinsaga -i examples/sample-chronicle.json validate --gps --suggest
+./target/release/kinsaga -i examples/sample-chronicle.json validate --gps --suggest --apply
 ```
 
 ## Design Decisions

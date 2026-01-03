@@ -1,12 +1,33 @@
 {
   "version": "1.0",
   "title": "The Chronicles of the Smith Family",
+  "last_updated": "2026-01-03T15:27:40Z",
   "categories": [
-    { "id": "education", "label": "Education & Job", "color": "#4A90D9" },
-    { "id": "family", "label": "Family & Friends", "color": "#E57373" },
-    { "id": "travel", "label": "Travels & Holidays", "color": "#81C784" },
-    { "id": "hobby", "label": "Hobbies & Interests", "color": "#FFD54F" },
-    { "id": "circumstance", "label": "Circumstances & Events", "color": "#9575CD" }
+    {
+      "id": "education",
+      "label": "Education & Job",
+      "color": "#4A90D9"
+    },
+    {
+      "id": "family",
+      "label": "Family & Friends",
+      "color": "#E57373"
+    },
+    {
+      "id": "travel",
+      "label": "Travels & Holidays",
+      "color": "#81C784"
+    },
+    {
+      "id": "hobby",
+      "label": "Hobbies & Interests",
+      "color": "#FFD54F"
+    },
+    {
+      "id": "circumstance",
+      "label": "Circumstances & Events",
+      "color": "#9575CD"
+    }
   ],
   "persons": [
     {
@@ -48,18 +69,25 @@
           "date": "2015",
           "category": "family",
           "text": "Married Bob",
-          "with": ["bob"]
+          "with": [
+            "bob"
+          ]
         },
         {
           "id": "a7b8c9d0-e1f2-3456-0123-567890123456",
           "date": "2018",
           "category": "travel",
           "text": "Trip to Japan",
-          "with": ["bob"],
+          "with": [
+            "bob"
+          ],
           "location": {
             "country": "Japan",
             "place": "Tokyo",
-            "coordinates": { "lat": 35.6762, "lon": 139.6503 }
+            "coordinates": {
+              "lat": 35.6762,
+              "lon": 139.6503
+            }
           },
           "attachments": [
             {
@@ -79,6 +107,23 @@
           "date": "2020",
           "category": "circumstance",
           "text": "Moved to new house in Shelbyville"
+        },
+        {
+          "id": "e20ae941-3391-43d5-bb6d-721d20d5c0ea",
+          "date": "2025-10-17",
+          "category": "travel",
+          "text": "Mountain retreat with friends",
+          "with": [
+            "bob"
+          ],
+          "location": {
+            "country": "CH",
+            "place": "Mettmenalp, Schwändi",
+            "coordinates": {
+              "lat": 46.960566,
+              "lon": 9.099201
+            }
+          }
         }
       ]
     },
@@ -103,10 +148,16 @@
           "date": "2015",
           "category": "family",
           "text": "Married Alice",
-          "with": ["alice"],
+          "with": [
+            "alice"
+          ],
           "location": {
             "country": "USA",
-            "place": "Springfield"
+            "place": "Springfield",
+            "coordinates": {
+              "lat": 39.7990175,
+              "lon": -89.6439575
+            }
           },
           "attachments": [
             {
@@ -121,11 +172,16 @@
           "date": "2018",
           "category": "travel",
           "text": "Trip to Japan",
-          "with": ["alice"],
+          "with": [
+            "alice"
+          ],
           "location": {
             "country": "Japan",
             "place": "Tokyo",
-            "coordinates": { "lat": 35.6762, "lon": 139.6503 }
+            "coordinates": {
+              "lat": 35.6762,
+              "lon": 139.6503
+            }
           }
         },
         {
