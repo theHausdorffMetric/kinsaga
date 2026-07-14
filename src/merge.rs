@@ -120,10 +120,12 @@ pub fn merge_chronicles(
         }
     }
 
-    // Build lookup maps for target
-    let target_category_ids: HashSet<String> =
+    // Build lookup maps for target. These are kept up to date as items are
+    // added, so a malformed source that lists the same person or category
+    // twice cannot create duplicate entries in the target.
+    let mut target_category_ids: HashSet<String> =
         target.categories.iter().map(|c| c.id.clone()).collect();
-    let target_person_ids: HashSet<String> =
+    let mut target_person_ids: HashSet<String> =
         target.persons.iter().map(|p| p.id.clone()).collect();
 
     // === Merge Categories ===
@@ -167,6 +169,7 @@ pub fn merge_chronicles(
                 stats.categories_identical += 1;
             }
         } else {
+            target_category_ids.insert(source_cat.id.clone());
             target.categories.push(source_cat.clone());
             events.push(MergeEvent {
                 event_type: MergeEventType::Added,
@@ -197,11 +200,29 @@ pub fn merge_chronicles(
                 match options.on_conflict {
                     ConflictStrategy::Skip => {
                         // Keep target name, but still merge facts
+                        events.push(MergeEvent {
+                            event_type: MergeEventType::Skipped,
+                            item_type: MergeItemType::Person,
+                            id: source_person.id.clone(),
+                            details: Some(format!(
+                                "name conflict: kept '{}' over '{}'",
+                                target_name, source_person.name
+                            )),
+                        });
                     }
                     ConflictStrategy::Overwrite => {
                         if let Some(p) = target.find_person_mut(&source_person.id) {
                             p.name = source_person.name.clone();
                         }
+                        events.push(MergeEvent {
+                            event_type: MergeEventType::Overwritten,
+                            item_type: MergeItemType::Person,
+                            id: source_person.id.clone(),
+                            details: Some(format!(
+                                "name overwritten: '{}' -> '{}'",
+                                target_name, source_person.name
+                            )),
+                        });
                     }
                     ConflictStrategy::Fail => {
                         return Err(MergeError::PersonNameConflict {
@@ -249,23 +270,10 @@ pub fn merge_chronicles(
                     source_fact.id.clone()
                 };
 
-                // Create fact with potentially new UUID
-                let mut new_fact = Fact::new(
-                    &new_uuid,
-                    &source_fact.date,
-                    &source_fact.category,
-                    &source_fact.text,
-                );
-                if let Some(ref with) = source_fact.with {
-                    new_fact = new_fact.with_persons(with.clone());
-                }
-                if let Some(ref location) = source_fact.location {
-                    new_fact = new_fact.with_location(location.clone());
-                }
-                if !source_fact.attachments.is_empty() {
-                    new_fact = new_fact.with_attachments(source_fact.attachments.clone());
-                }
-
+                // Clone the fact wholesale so any future Fact fields
+                // survive merges, then set the (possibly new) UUID
+                let mut new_fact = source_fact.clone();
+                new_fact.id = new_uuid;
                 facts_to_add.push(new_fact);
                 facts_added += 1;
                 stats.facts_added += 1;
@@ -320,6 +328,7 @@ pub fn merge_chronicles(
                 details: Some(format!("{} facts", fact_count)),
             });
 
+            target_person_ids.insert(source_person.id.clone());
             target.persons.push(new_person);
             stats.persons_added += 1;
             stats.facts_added += fact_count;
@@ -471,6 +480,90 @@ mod tests {
 
         assert_eq!(result.chronicle.persons[0].facts.len(), 1);
         assert_eq!(result.stats.facts_skipped, 1);
+    }
+
+    #[test]
+    fn test_merge_source_with_duplicate_person_ids_creates_no_duplicates() {
+        let target = Chronicle::new("1.0");
+
+        // Malformed source listing the same person ID twice
+        let mut source = Chronicle::new("1.0");
+        source.categories.push(Category::new("family", "Family"));
+        let mut p1 = Person::new("alice", "Alice");
+        p1.facts.push(Fact::new("uuid-1", "2020-01-01", "family", "Event 1"));
+        let mut p2 = Person::new("alice", "Alice");
+        p2.facts.push(Fact::new("uuid-2", "2020-01-02", "family", "Event 2"));
+        source.persons.push(p1);
+        source.persons.push(p2);
+
+        let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
+
+        // The second occurrence must merge into the first, not duplicate it
+        assert_eq!(result.chronicle.persons.len(), 1);
+        assert_eq!(result.chronicle.persons[0].facts.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_preserves_all_fact_fields() {
+        use crate::{Attachment, Location};
+        use url::Url;
+
+        // Target already contains the fact's UUID, forcing the clone+new-id path
+        let mut target = Chronicle::new("1.0");
+        target.categories.push(Category::new("travel", "Travel"));
+        let mut alice = Person::new("alice", "Alice");
+        alice.facts.push(Fact::new(
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "2019-01-01",
+            "travel",
+            "Existing event",
+        ));
+        target.persons.push(alice);
+
+        let mut source = Chronicle::new("1.0");
+        source.categories.push(Category::new("travel", "Travel"));
+        let mut alice = Person::new("alice", "Alice");
+        let url = Url::parse("https://example.com/photo.jpg").unwrap();
+        alice.facts.push(
+            Fact::new(
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "2020-06-15",
+                "travel",
+                "Rich event",
+            )
+            .with_persons(vec!["alice".to_string()])
+            .with_location(Location::new("France").with_place("Paris"))
+            .with_attachment(Attachment::new(url).with_title("Photo")),
+        );
+        source.persons.push(alice);
+
+        let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
+
+        let facts = &result.chronicle.persons[0].facts;
+        assert_eq!(facts.len(), 2);
+        let merged = &facts[1];
+        assert_ne!(merged.id, "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        assert_eq!(merged.location.as_ref().unwrap().country, "France");
+        assert_eq!(merged.attachments.len(), 1);
+        assert_eq!(merged.with, Some(vec!["alice".to_string()]));
+    }
+
+    #[test]
+    fn test_merge_name_conflict_skip_emits_event() {
+        let mut target = Chronicle::new("1.0");
+        target.persons.push(Person::new("alice", "Alice Target"));
+
+        let mut source = Chronicle::new("1.0");
+        source.persons.push(Person::new("alice", "Alice Source"));
+
+        let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
+
+        assert_eq!(result.chronicle.persons[0].name, "Alice Target");
+        assert!(result.events.iter().any(|e| {
+            e.event_type == MergeEventType::Skipped
+                && e.item_type == MergeItemType::Person
+                && e.id == "alice"
+        }));
     }
 
     #[test]

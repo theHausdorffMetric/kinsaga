@@ -24,6 +24,8 @@ pub enum IssueType {
     EmptyUuid,
     InvalidUuid,
     DuplicateUuid,
+    DuplicatePersonId,
+    DuplicateCategoryId,
     UnknownCategory,
     InvalidDate,
     UnknownPersonRef,
@@ -35,7 +37,10 @@ pub enum IssueType {
 impl IssueType {
     /// Returns whether this issue type is an error (vs warning).
     pub fn is_error(&self) -> bool {
-        matches!(self, IssueType::DuplicateUuid)
+        matches!(
+            self,
+            IssueType::DuplicateUuid | IssueType::DuplicatePersonId | IssueType::DuplicateCategoryId
+        )
     }
 }
 
@@ -74,11 +79,33 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
     result.person_count = chronicle.persons.len();
     result.fact_count = chronicle.persons.iter().map(|p| p.facts.len()).sum();
 
-    // Build category ID set for reference checking
-    let category_ids: HashSet<&str> = chronicle.categories.iter().map(|c| c.id.as_str()).collect();
+    // Build category ID set for reference checking; duplicate category IDs
+    // are an error (find_category silently returns the first match)
+    let mut category_ids: HashSet<&str> = HashSet::new();
+    for category in &chronicle.categories {
+        if !category_ids.insert(category.id.as_str()) {
+            result.errors.push(ValidationIssue {
+                person_id: String::new(),
+                fact_id: None,
+                message: format!("Duplicate category ID '{}'", category.id),
+                issue_type: IssueType::DuplicateCategoryId,
+            });
+        }
+    }
 
-    // Build person ID set for reference checking
-    let person_ids: HashSet<&str> = chronicle.persons.iter().map(|p| p.id.as_str()).collect();
+    // Build person ID set for reference checking; duplicate person IDs are
+    // an error (find_person silently returns the first match)
+    let mut person_ids: HashSet<&str> = HashSet::new();
+    for person in &chronicle.persons {
+        if !person_ids.insert(person.id.as_str()) {
+            result.errors.push(ValidationIssue {
+                person_id: person.id.clone(),
+                fact_id: None,
+                message: format!("Duplicate person ID '{}'", person.id),
+                issue_type: IssueType::DuplicatePersonId,
+            });
+        }
+    }
 
     for person in &chronicle.persons {
         for fact in &person.facts {
@@ -316,6 +343,26 @@ mod tests {
         assert!(!result.has_no_errors());
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].issue_type, IssueType::DuplicateUuid);
+    }
+
+    #[test]
+    fn test_validate_duplicate_person_and_category_ids() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        chronicle.categories.push(Category::new("family", "Family 2"));
+        chronicle.persons.push(Person::new("alice", "Alice"));
+        chronicle.persons.push(Person::new("alice", "Alice 2"));
+
+        let result = validate_chronicle(&chronicle);
+        assert!(!result.has_no_errors());
+        assert!(result
+            .errors
+            .iter()
+            .any(|i| i.issue_type == IssueType::DuplicateCategoryId));
+        assert!(result
+            .errors
+            .iter()
+            .any(|i| i.issue_type == IssueType::DuplicatePersonId));
     }
 
     #[test]

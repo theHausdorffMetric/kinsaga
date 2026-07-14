@@ -1489,16 +1489,20 @@ fn cmd_merge(
         eprintln!("  (no changes)");
     } else {
         for event in person_events {
+            let details = event.details.as_deref().unwrap_or("");
             match event.event_type {
                 MergeEventType::Added => {
-                    let details = event.details.as_deref().unwrap_or("");
                     eprintln!("  {} {} (new, {})", "+".green(), event.id, details);
                 }
                 MergeEventType::Merged => {
-                    let details = event.details.as_deref().unwrap_or("");
                     eprintln!("  {} {} (merged: {})", "~".cyan(), event.id, details);
                 }
-                _ => {}
+                MergeEventType::Skipped => {
+                    eprintln!("  {} {} ({})", "~".yellow(), event.id, details);
+                }
+                MergeEventType::Overwritten => {
+                    eprintln!("  {} {} ({})", "~".cyan(), event.id, details);
+                }
             }
         }
     }
