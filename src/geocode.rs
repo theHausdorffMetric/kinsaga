@@ -283,6 +283,35 @@ const COUNTRY_CODES: &[(&str, &[&str])] = &[
     ("ph", &["philippines"]),
 ];
 
+/// Check if `needle` occurs in `haystack` on word boundaries, i.e. not as
+/// part of a longer alphanumeric run. Plain substring matching would let
+/// short strings like ISO codes match unrelated names ("CH" in "China",
+/// "US" in "Russia", "uk" in "Ukraine").
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(needle) {
+        let begin = start + pos;
+        let end = begin + needle.len();
+        let before_ok = haystack[..begin]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric());
+        let after_ok = haystack[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+        // Boundary check failed: advance one character and keep searching
+        start = begin + haystack[begin..].chars().next().map_or(1, |c| c.len_utf8());
+    }
+    false
+}
+
 /// Check if a string matches a country code or any of its names.
 fn matches_country_code(code: &str, name: &str) -> bool {
     let code_lower = code.to_lowercase();
@@ -292,7 +321,9 @@ fn matches_country_code(code: &str, name: &str) -> bool {
         if code_lower == *iso_code {
             // Code matches, check if name matches any of the country names
             for country_name in *names {
-                if name_lower.contains(country_name) || country_name.contains(&name_lower) {
+                if contains_word(&name_lower, country_name)
+                    || contains_word(country_name, &name_lower)
+                {
                     return true;
                 }
             }
@@ -307,8 +338,12 @@ fn same_country(a: &str, b: &str) -> bool {
     let b_lower = b.to_lowercase();
 
     for (_iso_code, names) in COUNTRY_CODES {
-        let a_matches = names.iter().any(|n| a_lower.contains(n) || n.contains(&a_lower));
-        let b_matches = names.iter().any(|n| b_lower.contains(n) || n.contains(&b_lower));
+        let a_matches = names
+            .iter()
+            .any(|n| contains_word(&a_lower, n) || contains_word(n, &a_lower));
+        let b_matches = names
+            .iter()
+            .any(|n| contains_word(&b_lower, n) || contains_word(n, &b_lower));
 
         if a_matches && b_matches {
             return true;
@@ -335,18 +370,19 @@ pub fn fuzzy_match(a: &str, b: &str) -> bool {
         return true;
     }
 
-    // One contains the other
-    if a_norm.contains(&b_norm) || b_norm.contains(&a_norm) {
-        return true;
-    }
-
-    // Check if one is an ISO country code matching the other
+    // ISO country code and country-name matching come before the containment
+    // shortcut so short codes never substring-match unrelated names.
     if matches_country_code(a, b) || matches_country_code(b, a) {
         return true;
     }
 
     // Check if both are names for the same country (e.g., "Japan" and "日本")
     if same_country(a, b) {
+        return true;
+    }
+
+    // One contains the other as a whole word (e.g. "Paris" in "Paris, France")
+    if contains_word(&a_norm, &b_norm) || contains_word(&b_norm, &a_norm) {
         return true;
     }
 
@@ -409,6 +445,27 @@ mod tests {
         assert!(fuzzy_match("Japan", "日本"));
         assert!(fuzzy_match("Deutschland", "Germany"));
         assert!(fuzzy_match("Schweiz", "Switzerland"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_no_short_code_false_positives() {
+        // ISO codes must not substring-match unrelated country names
+        assert!(!fuzzy_match("CH", "China"));
+        assert!(!fuzzy_match("US", "Russia"));
+        assert!(!fuzzy_match("IN", "Argentina"));
+        assert!(!fuzzy_match("Ukraine", "United Kingdom"));
+    }
+
+    #[test]
+    fn test_contains_word() {
+        assert!(contains_word("paris, france", "paris"));
+        assert!(contains_word("new york city", "new york"));
+        assert!(contains_word("schweiz/suisse/svizzera", "schweiz"));
+        assert!(!contains_word("china", "ch"));
+        assert!(!contains_word("russia", "us"));
+        assert!(!contains_word("ukraine", "uk"));
+        assert!(!contains_word("jerusalem", "usa"));
+        assert!(!contains_word("paris", ""));
     }
 
     #[test]
