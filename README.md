@@ -143,7 +143,7 @@ Supports ISO country codes (CH, JP, US, etc.) and native language names (Schweiz
 
 ## Documentation
 
-See [STATUS.md](STATUS.md) for detailed documentation including:
+See [STATUS.md](https://git.sr.ht/~danprobst/kinsaga/tree/master/item/STATUS.md) for detailed documentation including:
 - Complete CLI reference with all options
 - Library API documentation
 - Validation checks
