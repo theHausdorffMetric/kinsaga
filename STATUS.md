@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2026-07-14 (correctness fixes + CLI contract, see CODE_REVIEW.md)
+**Last Updated:** 2026-07-14 (all CODE_REVIEW.md phases complete; v0.4.0)
 
 ## Overview
 
@@ -18,7 +18,8 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 - **Search/Filter** (`src/filter.rs`): Filter by category, year range, text; search across all persons; chronological sorting
 - **Validation** (`src/validate.rs`): Chronicle validation with detailed issue reporting; UUID correction
 - **Merge** (`src/merge.rs`): Merge chronicles with conflict resolution strategies
-- **Facts** (`src/facts.rs`): Fact creation with validation, propagation to related persons, timeline collection
+- **Facts** (`src/facts.rs`): Fact creation/editing/removal with validation, propagation to related persons, timeline collection
+- **Persons** (`src/persons.rs`): Person management (add/remove with 'with'-reference handling)
 - **Formatting** (`src/format.rs`): Display helpers for locations, attachments, dates, CSV escaping
 - **Geocoding** (`src/geocode.rs`): Nominatim integration for GPS validation and coordinate lookup
 
@@ -155,26 +156,32 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 kinsaga/
 ├── Cargo.toml              # Single crate with lib + bin
 ├── STATUS.md               # This file
+├── CODE_REVIEW.md          # 2026-07 review findings + implementation log
+├── .build.yml              # builds.sr.ht CI (fmt, clippy, tests)
 ├── schema.json             # JSON Schema for chronicle files (embedded in CLI)
 ├── examples/
 │   └── sample-chronicle.json
+├── tests/
+│   └── cli.rs              # CLI integration tests (assert_cmd)
 └── src/
     ├── lib.rs              # Library exports
     ├── main.rs             # CLI application (thin wrapper over library)
     ├── model.rs            # Data structures (Chronicle, Person, Fact, etc.)
-    ├── date.rs             # Date parsing (ChronicleDate)
-    ├── io.rs               # JSON I/O (load, save)
+    ├── date.rs             # Date parsing (ChronicleDate, cmp_date_strings)
+    ├── io.rs               # JSON I/O (load, atomic save)
     ├── filter.rs           # Search/filter logic (FactFilter, search)
     ├── validate.rs         # Validation (validate_chronicle, correct_uuids)
     ├── merge.rs            # Merge operations (merge_chronicles)
-    ├── facts.rs            # Fact operations (add_fact, collect_timeline_facts)
+    ├── facts.rs            # Fact operations (add_fact, edit_fact, remove_fact)
+    ├── persons.rs          # Person operations (add_person, remove_person)
     ├── format.rs           # Display formatting (format_location, escape_csv)
-    └── geocode.rs          # Nominatim geocoding (NominatimClient, fuzzy_match)
+    └── geocode.rs          # Nominatim geocoding (validate_gps, suggest_coordinates)
 ```
 
 ## Configuration
 
-- **Edition:** Rust 2024
+- **Edition:** Rust 2024 (MSRV 1.88)
+- **CI:** builds.sr.ht via `.build.yml` (fmt, clippy `-D warnings`, tests)
 - **License:** GPL-3.0-or-later
 - **Author:** Daniel Probst <daniel@probst.dev>
 - **Repository:** https://git.sr.ht/~danprobst/kinsaga
@@ -191,9 +198,7 @@ clap = { version = "4.6", features = ["derive", "env"] }
 dotenvy = "0.15"
 colored = "3.1"
 anyhow = "1.0"
-log = "0.4"
-env_logger = "0.11"
-chrono = "0.4"
+jiff = "0.2"
 url = { version = "2.5", features = ["serde"] }
 regex = "1.13"
 tempfile = "3.27"
@@ -366,9 +371,6 @@ echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
 
 # Validate and correct UUIDs (modify file in place)
 ./target/release/kinsaga -i examples/sample-chronicle.json validate --correct --in-place
-
-# Enable logging
-RUST_LOG=warn ./target/release/kinsaga -i examples/sample-chronicle.json validate
 
 # Add facts
 ./target/release/kinsaga -i examples/sample-chronicle.json add-fact alice -d 2020-06-15 -c family -t "Graduated from university"

@@ -1,7 +1,7 @@
 //! File I/O for chronicles.
 
 use crate::Chronicle;
-use chrono::Utc;
+use jiff::Timestamp;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -36,7 +36,7 @@ pub fn load<P: AsRef<Path>>(path: P) -> Result<Chronicle, IoError> {
 pub fn save<P: AsRef<Path>>(path: P, chronicle: &Chronicle) -> Result<(), IoError> {
     let path = path.as_ref();
     let mut chronicle = chronicle.clone();
-    chronicle.last_updated = Some(Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    chronicle.last_updated = Some(Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string());
     let mut json = serde_json::to_string_pretty(&chronicle)?;
     json.push('\n');
 

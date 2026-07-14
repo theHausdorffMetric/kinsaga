@@ -488,7 +488,15 @@ which strips the references.
   `remove-person <id> [--force]` with `with`-reference warnings. Library functions
   first, thin CLI on top. (Feature work — can ship independently.)
 
-### Phase 5 — Process, deps, docs
+### Phase 5 — Process, deps, docs ✅ DONE (2026-07-14)
+
+Implemented: cargo fmt baseline + `.build.yml` CI (F25), rust-version 1.88 +
+dependency trim (F21, F26), doc sync (F27, F28). log/env_logger dropped (no
+log macro was ever called). chrono replaced with `jiff = "0.2"` — the house
+standard across ncoxide/qloxide/mindtask — for the single `last_updated`
+timestamp; output format is byte-identical. F20's mechanical schema
+cross-check was **parked by owner decision** (2026-07-14); validators and
+schema are in parity as of `bed23c6`, maintained by discipline.
 
 **Step 5.1 — CI (F25, second half)**
 - `.build.yml` for builds.sr.ht: stable toolchain, `cargo fmt --check`,

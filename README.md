@@ -96,6 +96,11 @@ kinsaga validate --gps --suggest --apply --in-place
 
 Supports ISO country codes (CH, JP, US, etc.) and native language names (Schweiz, 日本, etc.).
 
+> **Privacy note:** GPS validation sends your chronicle's coordinates and
+> place names to the public OpenStreetMap Nominatim service. For sensitive
+> family data, consider a self-hosted Nominatim instance — the library
+> supports one via `NominatimClient::with_base_url`.
+
 ## Chronicle Format
 
 ```json
