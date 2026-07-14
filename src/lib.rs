@@ -43,11 +43,11 @@ pub mod merge;
 pub mod model;
 pub mod validate;
 
-pub use date::ChronicleDate;
+pub use date::{ChronicleDate, DateError};
 pub use facts::{
     add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
     AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions, EditFactResult,
-    LocationUpdate, TimelineFact, WithUpdate,
+    FactError, LocationUpdate, TimelineFact, WithUpdate,
 };
 pub use filter::{filter_facts, search, FactFilter, SearchResult};
 pub use format::{escape_csv, format_attachment, format_attachment_markdown, format_date_display, format_location, truncate_text};
@@ -56,8 +56,11 @@ pub use geocode::{
     fuzzy_match, suggest_coordinates, validate_gps, GeocodedPlace, GeocodeError,
     GpsCheckOutcome, GpsSuggestion, GpsSuggestOutcome, GpsValidationResult, NominatimClient,
 };
-pub use io::{load, save};
-pub use merge::{merge_chronicles, ConflictStrategy, DuplicateStrategy, MergeEvent, MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats};
+pub use io::{from_json, load, save, to_json, IoError};
+pub use merge::{
+    merge_chronicles, ConflictStrategy, DuplicateStrategy, MergeError, MergeEvent,
+    MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats,
+};
 pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};
 pub use validate::{correct_uuids, is_valid_mime_type, validate_chronicle, IssueType, ValidationIssue, ValidationResult};
 

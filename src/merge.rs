@@ -3,6 +3,7 @@
 use crate::format::truncate_text;
 use crate::{Chronicle, Fact};
 use std::collections::HashSet;
+use thiserror::Error;
 use uuid::Uuid;
 
 /// Strategy for handling conflicts during merge.
@@ -88,18 +89,18 @@ pub struct MergeResult {
 }
 
 /// Error that can occur during merge.
-#[derive(Debug, Clone)]
-pub struct MergeError {
-    pub message: String,
-}
+#[derive(Debug, Clone, Error)]
+pub enum MergeError {
+    #[error("Category conflict: '{id}' exists with different values")]
+    CategoryConflict { id: String },
 
-impl std::fmt::Display for MergeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
+    #[error("Person conflict: '{id}' has different name ('{target_name}' vs '{source_name}')")]
+    PersonNameConflict {
+        id: String,
+        target_name: String,
+        source_name: String,
+    },
 }
-
-impl std::error::Error for MergeError {}
 
 /// Merge a source chronicle into a target chronicle.
 pub fn merge_chronicles(
@@ -157,11 +158,8 @@ pub fn merge_chronicles(
                         stats.categories_overwritten += 1;
                     }
                     ConflictStrategy::Fail => {
-                        return Err(MergeError {
-                            message: format!(
-                                "Category conflict: '{}' exists with different values",
-                                source_cat.id
-                            ),
+                        return Err(MergeError::CategoryConflict {
+                            id: source_cat.id.clone(),
                         });
                     }
                 }
@@ -206,11 +204,10 @@ pub fn merge_chronicles(
                         }
                     }
                     ConflictStrategy::Fail => {
-                        return Err(MergeError {
-                            message: format!(
-                                "Person conflict: '{}' has different name ('{}' vs '{}')",
-                                source_person.id, target_name, source_person.name
-                            ),
+                        return Err(MergeError::PersonNameConflict {
+                            id: source_person.id.clone(),
+                            target_name,
+                            source_name: source_person.name.clone(),
                         });
                     }
                 }

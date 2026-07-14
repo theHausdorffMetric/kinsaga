@@ -1186,12 +1186,10 @@ fn cmd_add_fact(
         .unwrap_or_else(|| category_id.to_string());
 
     // Build location using library function
-    let location = build_location(country, place, lat, lon)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let location = build_location(country, place, lat, lon)?;
 
     // Build attachments using library function
-    let parsed_attachments = build_attachments(attachments, attach_type, attach_title)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let parsed_attachments = build_attachments(attachments, attach_type, attach_title)?;
 
     // Warn if --propagate is used without --with
     if propagate && with.is_none() {
@@ -1212,8 +1210,7 @@ fn cmd_add_fact(
         propagate,
     };
 
-    let result = add_fact(&mut chronicle, person_id, options)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let result = add_fact(&mut chronicle, person_id, options)?;
 
     // Format location for display
     let location_display = location.as_ref().map(format_location);
@@ -1370,7 +1367,7 @@ fn cmd_edit_fact(
         anyhow::bail!("No changes specified. Use --date, --category, --text, --with, --country, --place, --lat, --lon, --add-attach, --remove-attach, or clear flags.");
     }
 
-    let result = edit_fact(&mut chronicle, uuid, options).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let result = edit_fact(&mut chronicle, uuid, options)?;
 
     // Get the updated fact for display
     let updated_fact = chronicle
@@ -1452,8 +1449,7 @@ fn cmd_merge(
     eprintln!();
 
     // Use library merge function
-    let result = merge_chronicles(target, &source, &options)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let result = merge_chronicles(target, &source, &options)?;
 
     // Display events
     use kinsaga::{MergeEventType, MergeItemType};

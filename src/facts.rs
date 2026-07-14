@@ -1,8 +1,10 @@
 //! Fact creation and manipulation operations.
 
-use crate::{Attachment, Chronicle, ChronicleDate, Coordinates, Fact, Location};
+use crate::date::DateError;
 use crate::filter::{filter_facts, FactFilter};
 use crate::validate::is_valid_mime_type;
+use crate::{Attachment, Chronicle, ChronicleDate, Coordinates, Fact, Location};
+use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
@@ -32,19 +34,47 @@ pub struct AddFactResult {
     pub facts_added: Vec<(String, String, String)>,
 }
 
-/// Error that can occur when adding a fact.
-#[derive(Debug, Clone)]
-pub struct AddFactError {
-    pub message: String,
+/// Error that can occur when adding or editing a fact.
+///
+/// Variants are structured so library consumers (TUI, web) can match on
+/// the failure kind instead of parsing message strings.
+#[derive(Debug, Error)]
+pub enum FactError {
+    #[error("Person '{id}' not found. Available persons: {}", .available.join(", "))]
+    PersonNotFound { id: String, available: Vec<String> },
+
+    #[error("Person '{id}' in 'with' not found. Available persons: {}", .available.join(", "))]
+    WithPersonNotFound { id: String, available: Vec<String> },
+
+    #[error("Category '{id}' not found. Available categories: {}", .available.join(", "))]
+    CategoryNotFound { id: String, available: Vec<String> },
+
+    #[error("Invalid date format '{date}': {source}")]
+    InvalidDate { date: String, source: DateError },
+
+    #[error("Country cannot be empty")]
+    EmptyCountry,
+
+    #[error("Invalid GPS coordinates (lat: {lat}, lon: {lon}). Valid ranges: lat -90..90, lon -180..180")]
+    InvalidCoordinates { lat: f64, lon: f64 },
+
+    #[error("Invalid MIME type '{mime}'. Expected format: type/subtype (e.g., image/jpeg)")]
+    InvalidMimeType { mime: String },
+
+    #[error("Invalid URL '{url}'. URLs must include a scheme (e.g., file://, https://, s3://)")]
+    InvalidUrl { url: String },
+
+    #[error("Fact with UUID '{id}' not found")]
+    FactNotFound { id: String },
 }
 
-impl std::fmt::Display for AddFactError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
+fn person_ids(chronicle: &Chronicle) -> Vec<String> {
+    chronicle.persons.iter().map(|p| p.id.clone()).collect()
 }
 
-impl std::error::Error for AddFactError {}
+fn category_ids(chronicle: &Chronicle) -> Vec<String> {
+    chronicle.categories.iter().map(|c| c.id.clone()).collect()
+}
 
 /// Add a fact to a person's timeline.
 ///
@@ -54,43 +84,28 @@ pub fn add_fact(
     chronicle: &mut Chronicle,
     person_id: &str,
     options: AddFactOptions,
-) -> Result<AddFactResult, AddFactError> {
+) -> Result<AddFactResult, FactError> {
     // Validate person exists
     if chronicle.find_person(person_id).is_none() {
-        return Err(AddFactError {
-            message: format!(
-                "Person '{}' not found. Available persons: {}",
-                person_id,
-                chronicle
-                    .persons
-                    .iter()
-                    .map(|p| p.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+        return Err(FactError::PersonNotFound {
+            id: person_id.to_string(),
+            available: person_ids(chronicle),
         });
     }
 
     // Validate date format
-    if let Err(e) = ChronicleDate::parse(&options.date) {
-        return Err(AddFactError {
-            message: format!("Invalid date format '{}': {}", options.date, e),
+    if let Err(source) = ChronicleDate::parse(&options.date) {
+        return Err(FactError::InvalidDate {
+            date: options.date.clone(),
+            source,
         });
     }
 
     // Validate category exists
     if chronicle.find_category(&options.category).is_none() {
-        return Err(AddFactError {
-            message: format!(
-                "Category '{}' not found. Available categories: {}",
-                options.category,
-                chronicle
-                    .categories
-                    .iter()
-                    .map(|c| c.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+        return Err(FactError::CategoryNotFound {
+            id: options.category.clone(),
+            available: category_ids(chronicle),
         });
     }
 
@@ -98,17 +113,9 @@ pub fn add_fact(
     if let Some(ref with_ids) = options.with {
         for with_id in with_ids {
             if chronicle.find_person(with_id).is_none() {
-                return Err(AddFactError {
-                    message: format!(
-                        "Person '{}' in 'with' not found. Available persons: {}",
-                        with_id,
-                        chronicle
-                            .persons
-                            .iter()
-                            .map(|p| p.id.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                return Err(FactError::WithPersonNotFound {
+                    id: with_id.clone(),
+                    available: person_ids(chronicle),
                 });
             }
         }
@@ -117,18 +124,14 @@ pub fn add_fact(
     // Validate location if present
     if let Some(ref location) = options.location {
         if location.country.trim().is_empty() {
-            return Err(AddFactError {
-                message: "Country cannot be empty".to_string(),
-            });
+            return Err(FactError::EmptyCountry);
         }
         if let Some(ref coords) = location.coordinates
             && !coords.is_valid()
         {
-            return Err(AddFactError {
-                message: format!(
-                    "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
-                    coords.lat, coords.lon
-                ),
+            return Err(FactError::InvalidCoordinates {
+                lat: coords.lat,
+                lon: coords.lon,
             });
         }
     }
@@ -138,11 +141,8 @@ pub fn add_fact(
         if let Some(ref content_type) = attachment.content_type
             && !is_valid_mime_type(content_type)
         {
-            return Err(AddFactError {
-                message: format!(
-                    "Invalid MIME type '{}'. Expected format: type/subtype (e.g., image/jpeg)",
-                    content_type
-                ),
+            return Err(FactError::InvalidMimeType {
+                mime: content_type.clone(),
             });
         }
     }
@@ -312,7 +312,7 @@ pub fn build_location(
     place: Option<String>,
     lat: Option<f64>,
     lon: Option<f64>,
-) -> Result<Option<Location>, AddFactError> {
+) -> Result<Option<Location>, FactError> {
     if let Some(country_name) = country {
         let mut loc = Location::new(country_name);
         if let Some(place_name) = place {
@@ -321,11 +321,9 @@ pub fn build_location(
         if let (Some(lat_val), Some(lon_val)) = (lat, lon) {
             let coords = Coordinates::new(lat_val, lon_val);
             if !coords.is_valid() {
-                return Err(AddFactError {
-                    message: format!(
-                        "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
-                        lat_val, lon_val
-                    ),
+                return Err(FactError::InvalidCoordinates {
+                    lat: lat_val,
+                    lon: lon_val,
                 });
             }
             loc = loc.with_coordinates(coords);
@@ -341,29 +339,21 @@ pub fn build_attachments(
     urls: Option<Vec<String>>,
     content_type: Option<String>,
     title: Option<String>,
-) -> Result<Vec<Attachment>, AddFactError> {
+) -> Result<Vec<Attachment>, FactError> {
     let Some(url_strings) = urls else {
         return Ok(Vec::new());
     };
 
     let mut attachments = Vec::new();
     for url_str in url_strings {
-        let url = Url::parse(&url_str).map_err(|_| AddFactError {
-            message: format!(
-                "Invalid URL '{}'. URLs must include a scheme (e.g., file://, https://, s3://)",
-                url_str
-            ),
+        let url = Url::parse(&url_str).map_err(|_| FactError::InvalidUrl {
+            url: url_str.clone(),
         })?;
 
         let mut attachment = Attachment::new(url);
         if let Some(ref ct) = content_type {
             if !is_valid_mime_type(ct) {
-                return Err(AddFactError {
-                    message: format!(
-                        "Invalid MIME type '{}'. Expected format: type/subtype (e.g., image/jpeg)",
-                        ct
-                    ),
-                });
+                return Err(FactError::InvalidMimeType { mime: ct.clone() });
             }
             attachment = attachment.with_content_type(ct);
         }
@@ -458,20 +448,20 @@ pub fn edit_fact(
     chronicle: &mut Chronicle,
     fact_id: &str,
     options: EditFactOptions,
-) -> Result<EditFactResult, AddFactError> {
+) -> Result<EditFactResult, FactError> {
     // Find the fact
-    let (person_idx, fact_idx) = find_fact_by_id(chronicle, fact_id).ok_or_else(|| {
-        AddFactError {
-            message: format!("Fact with UUID '{}' not found", fact_id),
-        }
-    })?;
+    let (person_idx, fact_idx) =
+        find_fact_by_id(chronicle, fact_id).ok_or_else(|| FactError::FactNotFound {
+            id: fact_id.to_string(),
+        })?;
 
     // Validate new date if provided
     if let Some(ref date) = options.date
-        && let Err(e) = ChronicleDate::parse(date)
+        && let Err(source) = ChronicleDate::parse(date)
     {
-        return Err(AddFactError {
-            message: format!("Invalid date format '{}': {}", date, e),
+        return Err(FactError::InvalidDate {
+            date: date.clone(),
+            source,
         });
     }
 
@@ -479,17 +469,9 @@ pub fn edit_fact(
     if let Some(ref category) = options.category
         && chronicle.find_category(category).is_none()
     {
-        return Err(AddFactError {
-            message: format!(
-                "Category '{}' not found. Available categories: {}",
-                category,
-                chronicle
-                    .categories
-                    .iter()
-                    .map(|c| c.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+        return Err(FactError::CategoryNotFound {
+            id: category.clone(),
+            available: category_ids(chronicle),
         });
     }
 
@@ -497,17 +479,9 @@ pub fn edit_fact(
     if let Some(WithUpdate::Replace(ref with_ids)) = options.with {
         for with_id in with_ids {
             if chronicle.find_person(with_id).is_none() {
-                return Err(AddFactError {
-                    message: format!(
-                        "Person '{}' in 'with' not found. Available persons: {}",
-                        with_id,
-                        chronicle
-                            .persons
-                            .iter()
-                            .map(|p| p.id.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                return Err(FactError::WithPersonNotFound {
+                    id: with_id.clone(),
+                    available: person_ids(chronicle),
                 });
             }
         }
@@ -516,18 +490,14 @@ pub fn edit_fact(
     // Validate location if provided
     if let Some(LocationUpdate::Set(ref location)) = options.location {
         if location.country.trim().is_empty() {
-            return Err(AddFactError {
-                message: "Country cannot be empty".to_string(),
-            });
+            return Err(FactError::EmptyCountry);
         }
         if let Some(ref coords) = location.coordinates
             && !coords.is_valid()
         {
-            return Err(AddFactError {
-                message: format!(
-                    "Invalid GPS coordinates (lat: {}, lon: {}). Valid ranges: lat -90..90, lon -180..180",
-                    coords.lat, coords.lon
-                ),
+            return Err(FactError::InvalidCoordinates {
+                lat: coords.lat,
+                lon: coords.lon,
             });
         }
     }
@@ -538,11 +508,8 @@ pub fn edit_fact(
             if let Some(ref content_type) = attachment.content_type
                 && !is_valid_mime_type(content_type)
             {
-                return Err(AddFactError {
-                    message: format!(
-                        "Invalid MIME type '{}'. Expected format: type/subtype (e.g., image/jpeg)",
-                        content_type
-                    ),
+                return Err(FactError::InvalidMimeType {
+                    mime: content_type.clone(),
                 });
             }
         }
@@ -966,8 +933,10 @@ mod tests {
             },
         );
 
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("not found"));
+        assert!(matches!(
+            result.unwrap_err(),
+            FactError::FactNotFound { .. }
+        ));
     }
 
     #[test]
@@ -983,8 +952,10 @@ mod tests {
             },
         );
 
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("not found"));
+        assert!(matches!(
+            result.unwrap_err(),
+            FactError::CategoryNotFound { .. }
+        ));
     }
 
     #[test]
