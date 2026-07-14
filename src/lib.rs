@@ -62,7 +62,10 @@ pub use merge::{
     MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats,
 };
 pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};
-pub use validate::{correct_uuids, is_valid_mime_type, validate_chronicle, IssueType, ValidationIssue, ValidationResult};
+pub use validate::{
+    correct_uuids, is_valid_id, is_valid_mime_type, validate_chronicle, IssueType,
+    ValidationIssue, ValidationResult,
+};
 
 // Re-export url::Url for convenience
 pub use url::Url;

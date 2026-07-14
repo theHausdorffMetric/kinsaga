@@ -33,6 +33,7 @@ pub enum IssueType {
     InvalidCoordinates,
     InvalidMimeType,
     InvalidUrl,
+    InvalidId,
 }
 
 impl IssueType {
@@ -92,6 +93,17 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                 issue_type: IssueType::DuplicateCategoryId,
             });
         }
+        if !is_valid_id(&category.id) {
+            result.warnings.push(ValidationIssue {
+                person_id: String::new(),
+                fact_id: None,
+                message: format!(
+                    "Category ID '{}' doesn't match the schema pattern ^[a-z][a-z0-9_-]*$",
+                    category.id
+                ),
+                issue_type: IssueType::InvalidId,
+            });
+        }
     }
 
     // Build person ID set for reference checking; duplicate person IDs are
@@ -104,6 +116,17 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                 fact_id: None,
                 message: format!("Duplicate person ID '{}'", person.id),
                 issue_type: IssueType::DuplicatePersonId,
+            });
+        }
+        if !is_valid_id(&person.id) {
+            result.warnings.push(ValidationIssue {
+                person_id: person.id.clone(),
+                fact_id: None,
+                message: format!(
+                    "Person ID '{}' doesn't match the schema pattern ^[a-z][a-z0-9_-]*$",
+                    person.id
+                ),
+                issue_type: IssueType::InvalidId,
             });
         }
     }
@@ -259,6 +282,14 @@ pub fn correct_uuids(mut chronicle: Chronicle, corrections: &[(String, String)])
     chronicle
 }
 
+/// Check if an ID matches the schema pattern `^[a-z][a-z0-9_-]*$`
+/// (used for person and category IDs).
+pub fn is_valid_id(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
 /// Check if a string is a valid MIME type (basic format: type/subtype).
 pub fn is_valid_mime_type(s: &str) -> bool {
     let parts: Vec<&str> = s.split('/').collect();
@@ -283,6 +314,33 @@ pub fn is_valid_mime_type(s: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Category, Fact, Person};
+
+    #[test]
+    fn test_is_valid_id() {
+        assert!(is_valid_id("alice"));
+        assert!(is_valid_id("john-doe"));
+        assert!(is_valid_id("cat_2"));
+        assert!(!is_valid_id(""));
+        assert!(!is_valid_id("Alice"));
+        assert!(!is_valid_id("2cool"));
+        assert!(!is_valid_id("has space"));
+        assert!(!is_valid_id("umläut"));
+    }
+
+    #[test]
+    fn test_validate_invalid_id_pattern_warns() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("Family", "Family"));
+        chronicle.persons.push(Person::new("Alice Smith", "Alice"));
+
+        let result = validate_chronicle(&chronicle);
+        let id_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|i| i.issue_type == IssueType::InvalidId)
+            .collect();
+        assert_eq!(id_warnings.len(), 2);
+    }
 
     #[test]
     fn test_is_valid_mime_type() {

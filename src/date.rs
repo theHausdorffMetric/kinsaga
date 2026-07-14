@@ -163,12 +163,21 @@ pub fn cmp_date_strings(a: &str, b: &str) -> Ordering {
     }
 }
 
+// The component parsers enforce the ISO 8601 digit counts from schema.json
+// (^\d{4}(-\d{2}(-\d{2})?)?\??$): 4-digit year, 2-digit month and day.
+
 fn parse_year(s: &str) -> Result<u16, DateError> {
+    if s.len() != 4 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return Err(DateError::InvalidYear(s.to_string()));
+    }
     s.parse::<u16>()
         .map_err(|_| DateError::InvalidYear(s.to_string()))
 }
 
 fn parse_month(s: &str) -> Result<u8, DateError> {
+    if s.len() != 2 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return Err(DateError::InvalidMonth(s.to_string()));
+    }
     let month = s
         .parse::<u8>()
         .map_err(|_| DateError::InvalidMonth(s.to_string()))?;
@@ -181,6 +190,9 @@ fn parse_month(s: &str) -> Result<u8, DateError> {
 }
 
 fn parse_day(s: &str) -> Result<u8, DateError> {
+    if s.len() != 2 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return Err(DateError::InvalidDay(s.to_string()));
+    }
     let day = s
         .parse::<u8>()
         .map_err(|_| DateError::InvalidDay(s.to_string()))?;
@@ -295,5 +307,18 @@ mod tests {
     fn test_invalid_day() {
         assert!(ChronicleDate::parse("1987-03-32").is_err());
         assert!(ChronicleDate::parse("1987-03-00").is_err());
+    }
+
+    #[test]
+    fn test_iso_digit_counts_enforced() {
+        // Same shapes schema.json requires: 4-digit year, 2-digit month/day
+        assert!(ChronicleDate::parse("987").is_err());
+        assert!(ChronicleDate::parse("01987").is_err());
+        assert!(ChronicleDate::parse("1987-3").is_err());
+        assert!(ChronicleDate::parse("1987-03-5").is_err());
+        assert!(ChronicleDate::parse("1987-003").is_err());
+        // Proper forms still parse
+        assert!(ChronicleDate::parse("1987-03-05").is_ok());
+        assert!(ChronicleDate::parse("0987").is_ok());
     }
 }
