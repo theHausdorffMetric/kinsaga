@@ -3,6 +3,7 @@
 use crate::Chronicle;
 use chrono::Utc;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use thiserror::Error;
 
@@ -11,6 +12,9 @@ use thiserror::Error;
 pub enum IoError {
     #[error("failed to read file: {0}")]
     ReadError(#[from] std::io::Error),
+
+    #[error("failed to write file: {0}")]
+    WriteError(std::io::Error),
 
     #[error("failed to parse JSON: {0}")]
     ParseError(#[from] serde_json::Error),
@@ -25,11 +29,30 @@ pub fn load<P: AsRef<Path>>(path: P) -> Result<Chronicle, IoError> {
 
 /// Save a chronicle to a JSON file.
 /// Automatically updates the `last_updated` timestamp to the current UTC time.
+///
+/// The write is atomic: content goes to a temp file in the target's
+/// directory, which is then renamed over the target, so a crash mid-write
+/// can never leave a truncated or corrupt chronicle behind.
 pub fn save<P: AsRef<Path>>(path: P, chronicle: &Chronicle) -> Result<(), IoError> {
+    let path = path.as_ref();
     let mut chronicle = chronicle.clone();
     chronicle.last_updated = Some(Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
-    let json = serde_json::to_string_pretty(&chronicle)?;
-    fs::write(path, json)?;
+    let mut json = serde_json::to_string_pretty(&chronicle)?;
+    json.push('\n');
+
+    let dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(IoError::WriteError)?;
+    tmp.write_all(json.as_bytes()).map_err(IoError::WriteError)?;
+    tmp.as_file().sync_all().map_err(IoError::WriteError)?;
+    // Temp files are created with restrictive permissions; keep the
+    // target's existing ones when overwriting
+    if let Ok(meta) = fs::metadata(path) {
+        let _ = tmp.as_file().set_permissions(meta.permissions());
+    }
+    tmp.persist(path).map_err(|e| IoError::WriteError(e.error))?;
     Ok(())
 }
 
@@ -92,6 +115,32 @@ mod tests {
         assert_eq!(loaded.version, "1.0");
         assert_eq!(loaded.title, Some("Test".into()));
         assert_eq!(loaded.persons[0].name, "Alice Smith");
+    }
+
+    #[test]
+    fn test_save_leaves_no_temp_files_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chronicle.json");
+        save(&path, &sample_chronicle()).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(entries.len(), 1, "only the target file should exist");
+    }
+
+    #[test]
+    fn test_save_appends_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chronicle.json");
+        save(&path, &sample_chronicle()).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_save_to_missing_directory_fails() {
+        let result = save("/nonexistent/dir/file.json", &sample_chronicle());
+        assert!(matches!(result, Err(IoError::WriteError(_))));
     }
 
     #[test]
