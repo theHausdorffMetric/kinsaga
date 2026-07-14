@@ -216,7 +216,7 @@ enum Commands {
         text: Option<String>,
 
         /// Replace 'with' list (comma-separated person IDs)
-        #[arg(short, long, value_delimiter = ',')]
+        #[arg(short, long, value_delimiter = ',', conflicts_with = "clear_with")]
         with: Option<Vec<String>>,
 
         /// Clear all 'with' references
@@ -240,15 +240,23 @@ enum Commands {
         lon: Option<f64>,
 
         /// Clear location entirely
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["country", "place", "lat", "lon"])]
         clear_location: bool,
 
-        /// Add attachment URL
-        #[arg(long = "add-attach", value_name = "URL")]
+        /// Add attachment URL (can be specified multiple times)
+        #[arg(long = "add-attach", value_name = "URL", conflicts_with_all = ["remove_attachments", "clear_attachments"])]
         add_attachments: Option<Vec<String>>,
 
+        /// MIME content type for added attachments (requires --add-attach)
+        #[arg(long = "attach-type", value_name = "MIME", requires = "add_attachments")]
+        attach_type: Option<String>,
+
+        /// Title/description for added attachments (requires --add-attach)
+        #[arg(long = "attach-title", value_name = "TITLE", requires = "add_attachments")]
+        attach_title: Option<String>,
+
         /// Remove attachment by URL
-        #[arg(long = "remove-attach", value_name = "URL")]
+        #[arg(long = "remove-attach", value_name = "URL", conflicts_with = "clear_attachments")]
         remove_attachments: Option<Vec<String>>,
 
         /// Clear all attachments
@@ -369,6 +377,8 @@ fn main() -> Result<()> {
             lon,
             clear_location,
             add_attachments,
+            attach_type,
+            attach_title,
             remove_attachments,
             clear_attachments,
             dry_run,
@@ -386,6 +396,8 @@ fn main() -> Result<()> {
             lon,
             clear_location,
             add_attachments,
+            attach_type,
+            attach_title,
             remove_attachments,
             clear_attachments,
             dry_run,
@@ -1275,11 +1287,13 @@ fn cmd_edit_fact(
     lon: Option<f64>,
     clear_location: bool,
     add_attachments: Option<Vec<String>>,
+    attach_type: Option<String>,
+    attach_title: Option<String>,
     remove_attachments: Option<Vec<String>>,
     clear_attachments: bool,
     dry_run: bool,
 ) -> Result<()> {
-    use kinsaga::{Attachment, Coordinates, Location, Url};
+    use kinsaga::{Coordinates, Location};
 
     let mut chronicle = load(file).context("Failed to load chronicle")?;
 
@@ -1334,20 +1348,11 @@ fn cmd_edit_fact(
         with.map(WithUpdate::Replace)
     };
 
-    // Build attachment update
+    // Build attachment update (clap rejects conflicting flag combinations)
     let attachment_update = if clear_attachments {
         Some(AttachmentUpdate::Clear)
-    } else if let Some(urls) = add_attachments {
-        let mut attachments = Vec::new();
-        for url_str in urls {
-            let url = Url::parse(&url_str).map_err(|_| {
-                anyhow::anyhow!(
-                    "Invalid URL '{}'. URLs must include a scheme (e.g., file://, https://)",
-                    url_str
-                )
-            })?;
-            attachments.push(Attachment::new(url));
-        }
+    } else if add_attachments.is_some() {
+        let attachments = build_attachments(add_attachments, attach_type, attach_title)?;
         Some(AttachmentUpdate::Add(attachments))
     } else {
         remove_attachments.map(AttachmentUpdate::Remove)

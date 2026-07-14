@@ -506,7 +506,6 @@ mod tests {
     #[test]
     fn test_merge_preserves_all_fact_fields() {
         use crate::{Attachment, Location};
-        use url::Url;
 
         // Target already contains the fact's UUID, forcing the clone+new-id path
         let mut target = Chronicle::new("1.0");
@@ -523,7 +522,6 @@ mod tests {
         let mut source = Chronicle::new("1.0");
         source.categories.push(Category::new("travel", "Travel"));
         let mut alice = Person::new("alice", "Alice");
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
         alice.facts.push(
             Fact::new(
                 "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -533,7 +531,9 @@ mod tests {
             )
             .with_persons(vec!["alice".to_string()])
             .with_location(Location::new("France").with_place("Paris"))
-            .with_attachment(Attachment::new(url).with_title("Photo")),
+            .with_attachment(
+                Attachment::new("https://example.com/photo.jpg").with_title("Photo"),
+            ),
         );
         source.persons.push(alice);
 

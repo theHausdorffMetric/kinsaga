@@ -32,6 +32,7 @@ pub enum IssueType {
     EmptyCountry,
     InvalidCoordinates,
     InvalidMimeType,
+    InvalidUrl,
 }
 
 impl IssueType {
@@ -200,6 +201,18 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
 
             // Attachments validation
             for (i, attachment) in fact.attachments.iter().enumerate() {
+                if url::Url::parse(&attachment.url).is_err() {
+                    result.warnings.push(ValidationIssue {
+                        person_id: person.id.clone(),
+                        fact_id: Some(fact.id.clone()),
+                        message: format!(
+                            "Attachment {}: invalid URL '{}' (must include a scheme, e.g. file://, https://)",
+                            i + 1,
+                            attachment.url
+                        ),
+                        issue_type: IssueType::InvalidUrl,
+                    });
+                }
                 if let Some(ref content_type) = attachment.content_type
                     && !is_valid_mime_type(content_type)
                 {
@@ -343,6 +356,30 @@ mod tests {
         assert!(!result.has_no_errors());
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].issue_type, IssueType::DuplicateUuid);
+    }
+
+    #[test]
+    fn test_chronicle_with_invalid_attachment_url_loads_and_warns() {
+        // A malformed attachment URL must be a warning, not a load failure
+        let json = r#"{
+            "version": "1.0",
+            "categories": [{ "id": "family", "label": "Family" }],
+            "persons": [{
+                "id": "alice", "name": "Alice",
+                "facts": [{
+                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "date": "2020-01-01", "category": "family", "text": "Event",
+                    "attachments": [{ "url": "not a url" }]
+                }]
+            }]
+        }"#;
+
+        let chronicle = crate::io::from_json(json).expect("must load despite bad URL");
+        let result = validate_chronicle(&chronicle);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|i| i.issue_type == IssueType::InvalidUrl));
     }
 
     #[test]

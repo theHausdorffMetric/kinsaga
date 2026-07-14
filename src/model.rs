@@ -1,7 +1,6 @@
 //! Data model for family chronicles.
 
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 /// A family chronicle containing persons and their life events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +108,11 @@ pub struct Location {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Attachment {
     /// URL to the resource (file://, https://, s3://, etc.)
-    pub url: Url,
+    ///
+    /// Stored as the raw string: a malformed URL in a chronicle file is a
+    /// validation warning (see `validate_chronicle`) rather than a load
+    /// failure, and saving never rewrites (normalizes) user data.
+    pub url: String,
 
     /// Optional MIME content type (e.g., "image/jpeg", "application/pdf")
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,9 +243,12 @@ impl Location {
 
 impl Attachment {
     /// Create a new attachment with just a URL.
-    pub fn new(url: Url) -> Self {
+    ///
+    /// The URL is not validated here; use `facts::build_attachments` or
+    /// `validate_chronicle` for format checking.
+    pub fn new(url: impl Into<String>) -> Self {
         Self {
-            url,
+            url: url.into(),
             content_type: None,
             title: None,
         }
@@ -378,22 +384,22 @@ mod tests {
 
     #[test]
     fn test_attachment_builder() {
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
-        let att = Attachment::new(url)
+        let att = Attachment::new("https://example.com/photo.jpg")
             .with_content_type("image/jpeg")
             .with_title("Wedding photo");
 
-        assert_eq!(att.url.as_str(), "https://example.com/photo.jpg");
+        assert_eq!(att.url, "https://example.com/photo.jpg");
         assert_eq!(att.content_type, Some("image/jpeg".to_string()));
         assert_eq!(att.title, Some("Wedding photo".to_string()));
     }
 
     #[test]
     fn test_fact_with_location_and_attachments() {
-        let url = Url::parse("file:///photos/wedding.jpg").unwrap();
         let fact = Fact::new("uuid-1", "2020-06-15", "family", "Wedding day")
             .with_location(Location::new("France").with_place("Paris"))
-            .with_attachment(Attachment::new(url).with_title("Wedding photo"));
+            .with_attachment(
+                Attachment::new("file:///photos/wedding.jpg").with_title("Wedding photo"),
+            );
 
         assert!(fact.location.is_some());
         assert_eq!(fact.location.as_ref().unwrap().country, "France");
@@ -418,10 +424,9 @@ mod tests {
 
     #[test]
     fn test_serialize_fact_with_attachments() {
-        let url = Url::parse("s3://bucket/photos/eiffel.jpg").unwrap();
         let fact = Fact::new("uuid-1", "2020-06-15", "travel", "Visited Eiffel Tower")
             .with_attachment(
-                Attachment::new(url)
+                Attachment::new("s3://bucket/photos/eiffel.jpg")
                     .with_content_type("image/jpeg")
                     .with_title("Eiffel Tower photo"),
             );
@@ -461,7 +466,7 @@ mod tests {
         assert!(loc.coordinates.is_some());
 
         assert_eq!(fact.attachments.len(), 1);
-        assert_eq!(fact.attachments[0].url.as_str(), "https://example.com/photo.jpg");
+        assert_eq!(fact.attachments[0].url, "https://example.com/photo.jpg");
         assert_eq!(fact.attachments[0].content_type, Some("image/jpeg".to_string()));
     }
 

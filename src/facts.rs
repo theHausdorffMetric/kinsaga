@@ -342,11 +342,12 @@ pub fn build_attachments(
 
     let mut attachments = Vec::new();
     for url_str in url_strings {
-        let url = Url::parse(&url_str).map_err(|_| FactError::InvalidUrl {
+        // Validate the URL format but store the raw string (see model::Attachment)
+        Url::parse(&url_str).map_err(|_| FactError::InvalidUrl {
             url: url_str.clone(),
         })?;
 
-        let mut attachment = Attachment::new(url);
+        let mut attachment = Attachment::new(url_str);
         if let Some(ref ct) = content_type {
             if !is_valid_mime_type(ct) {
                 return Err(FactError::InvalidMimeType { mime: ct.clone() });
@@ -560,7 +561,7 @@ pub fn edit_fact(
         }
         Some(AttachmentUpdate::Remove(urls_to_remove)) => {
             fact.attachments
-                .retain(|a| !urls_to_remove.contains(&a.url.to_string()));
+                .retain(|a| !urls_to_remove.contains(&a.url));
         }
         Some(AttachmentUpdate::Clear) => {
             fact.attachments.clear();
@@ -983,13 +984,14 @@ mod tests {
     #[test]
     fn test_edit_fact_attachments_add() {
         let mut chronicle = create_test_chronicle();
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
 
         edit_fact(
             &mut chronicle,
             "uuid-1",
             EditFactOptions {
-                attachments: Some(AttachmentUpdate::Add(vec![Attachment::new(url)])),
+                attachments: Some(AttachmentUpdate::Add(vec![Attachment::new(
+                    "https://example.com/photo.jpg",
+                )])),
                 ..Default::default()
             },
         )
@@ -1002,14 +1004,15 @@ mod tests {
     #[test]
     fn test_edit_fact_attachments_remove() {
         let mut chronicle = create_test_chronicle();
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
 
         // First add an attachment
         edit_fact(
             &mut chronicle,
             "uuid-1",
             EditFactOptions {
-                attachments: Some(AttachmentUpdate::Add(vec![Attachment::new(url)])),
+                attachments: Some(AttachmentUpdate::Add(vec![Attachment::new(
+                    "https://example.com/photo.jpg",
+                )])),
                 ..Default::default()
             },
         )
@@ -1041,8 +1044,6 @@ mod tests {
     #[test]
     fn test_edit_fact_attachments_clear() {
         let mut chronicle = create_test_chronicle();
-        let url1 = Url::parse("https://example.com/photo1.jpg").unwrap();
-        let url2 = Url::parse("https://example.com/photo2.jpg").unwrap();
 
         // Add two attachments
         edit_fact(
@@ -1050,8 +1051,8 @@ mod tests {
             "uuid-1",
             EditFactOptions {
                 attachments: Some(AttachmentUpdate::Add(vec![
-                    Attachment::new(url1),
-                    Attachment::new(url2),
+                    Attachment::new("https://example.com/photo1.jpg"),
+                    Attachment::new("https://example.com/photo2.jpg"),
                 ])),
                 ..Default::default()
             },

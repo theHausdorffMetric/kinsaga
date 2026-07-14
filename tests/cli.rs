@@ -222,6 +222,81 @@ fn search_json_with_no_results_emits_empty_array() {
 }
 
 #[test]
+fn validate_reports_invalid_attachment_url_instead_of_failing_load() {
+    let tmp = write_temp(
+        r#"{
+        "version": "1.0",
+        "categories": [{ "id": "family", "label": "Family" }],
+        "persons": [{
+            "id": "alice", "name": "Alice",
+            "facts": [{
+                "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "date": "2020-01-01", "category": "family", "text": "Event",
+                "attachments": [{ "url": "not a url" }]
+            }]
+        }]
+    }"#,
+    );
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .arg("validate")
+        .assert()
+        .success() // warning-level, not an error
+        .stderr(predicate::str::contains("invalid URL"));
+}
+
+#[test]
+fn edit_fact_conflicting_attachment_flags_rejected() {
+    let tmp = temp_copy_of_sample();
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args([
+            "edit-fact",
+            "a7b8c9d0-e1f2-3456-0123-567890123456",
+            "--clear-attachments",
+            "--add-attach",
+            "https://example.com/x.jpg",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn edit_fact_add_attachment_with_type_and_title() {
+    let tmp = temp_copy_of_sample();
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args([
+            "edit-fact",
+            "b8c9d0e1-f2a3-4567-1234-678901234567",
+            "--add-attach",
+            "file:///photos/house.jpg",
+            "--attach-type",
+            "image/jpeg",
+            "--attach-title",
+            "New house",
+        ])
+        .assert()
+        .success();
+
+    let chronicle = kinsaga::load(tmp.path()).unwrap();
+    let fact = chronicle
+        .persons
+        .iter()
+        .flat_map(|p| &p.facts)
+        .find(|f| f.id == "b8c9d0e1-f2a3-4567-1234-678901234567")
+        .unwrap();
+    assert_eq!(fact.attachments.len(), 1);
+    assert_eq!(fact.attachments[0].url, "file:///photos/house.jpg");
+    assert_eq!(fact.attachments[0].content_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(fact.attachments[0].title.as_deref(), Some("New house"));
+}
+
+#[test]
 fn search_invalid_regex_reports_error() {
     kinsaga()
         .args(["-i", SAMPLE, "search", "[invalid", "--regex"])

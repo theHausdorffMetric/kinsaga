@@ -77,7 +77,6 @@ pub fn escape_csv(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::Coordinates;
-    use url::Url;
 
     #[test]
     fn test_format_location_country_only() {
@@ -101,8 +100,7 @@ mod tests {
 
     #[test]
     fn test_format_attachment_with_title() {
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
-        let att = Attachment::new(url).with_title("My Photo");
+        let att = Attachment::new("https://example.com/photo.jpg").with_title("My Photo");
         assert_eq!(
             format_attachment(&att),
             "My Photo (https://example.com/photo.jpg)"
@@ -111,15 +109,13 @@ mod tests {
 
     #[test]
     fn test_format_attachment_without_title() {
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
-        let att = Attachment::new(url);
+        let att = Attachment::new("https://example.com/photo.jpg");
         assert_eq!(format_attachment(&att), "https://example.com/photo.jpg");
     }
 
     #[test]
     fn test_format_attachment_markdown() {
-        let url = Url::parse("https://example.com/photo.jpg").unwrap();
-        let att = Attachment::new(url).with_title("My Photo");
+        let att = Attachment::new("https://example.com/photo.jpg").with_title("My Photo");
         assert_eq!(
             format_attachment_markdown(&att),
             "[My Photo](https://example.com/photo.jpg)"
