@@ -51,7 +51,11 @@ pub use facts::{
 };
 pub use filter::{filter_facts, search, FactFilter, SearchResult};
 pub use format::{escape_csv, format_attachment, format_attachment_markdown, format_date_display, format_location, truncate_text};
-pub use geocode::{fuzzy_match, GeocodedPlace, GeocodeError, GpsValidationResult, NominatimClient};
+pub use geocode::{
+    apply_suggestions, count_facts_with_coordinates, count_facts_without_coordinates,
+    fuzzy_match, suggest_coordinates, validate_gps, GeocodedPlace, GeocodeError,
+    GpsCheckOutcome, GpsSuggestion, GpsSuggestOutcome, GpsValidationResult, NominatimClient,
+};
 pub use io::{load, save};
 pub use merge::{merge_chronicles, ConflictStrategy, DuplicateStrategy, MergeEvent, MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats};
 pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};

@@ -840,7 +840,10 @@ fn cmd_validate(
     apply: bool,
     strict: bool,
 ) -> Result<()> {
-    use kinsaga::{fuzzy_match, Coordinates, NominatimClient};
+    use kinsaga::{
+        apply_suggestions, count_facts_with_coordinates, count_facts_without_coordinates,
+        suggest_coordinates, validate_gps, GpsCheckOutcome, GpsSuggestOutcome, NominatimClient,
+    };
 
     // Validate --in-place requires --correct or --apply
     if in_place && !correct && !apply {
@@ -906,7 +909,8 @@ fn cmd_validate(
         }
     }
 
-    // Handle --gps flag
+    // Handle --gps flag (all GPS logic lives in the library; this block
+    // only renders outcomes)
     if gps {
         eprintln!();
         eprintln!("{}", "Validating GPS coordinates...".cyan());
@@ -917,100 +921,71 @@ fn cmd_validate(
             " (https://git.sr.ht/~danprobst/kinsaga)"
         ));
 
-        // Collect facts with coordinates
-        let facts_with_coords: Vec<_> = chronicle
-            .persons
-            .iter()
-            .flat_map(|p| {
-                p.facts.iter().filter_map(|f| {
-                    f.location.as_ref().and_then(|loc| {
-                        loc.coordinates.as_ref().map(|coords| {
-                            (p.name.as_str(), f.id.as_str(), loc, coords)
-                        })
-                    })
-                })
-            })
-            .collect();
-
-        if facts_with_coords.is_empty() {
+        let with_coords = count_facts_with_coordinates(&chronicle);
+        if with_coords == 0 {
             eprintln!("  No facts with GPS coordinates found.");
         } else {
             eprintln!(
                 "  Checking {} location(s) with coordinates (1 req/sec rate limit)...",
-                facts_with_coords.len()
+                with_coords
             );
             eprintln!();
 
-            let mut checked = 0;
-            let mut mismatches = 0;
-            let mut errors = 0;
-
-            for (person_name, fact_id, location, coords) in facts_with_coords {
-                checked += 1;
-
-                match client.reverse_geocode(coords.lat, coords.lon) {
-                    Ok(place) => {
-                        let country_matches = place
-                            .country
-                            .as_ref()
-                            .is_some_and(|c| fuzzy_match(c, &location.country));
-
-                        let place_matches = location.place.as_ref().map(|stored_place| {
-                            // Check if stored place matches city, state, or display_name
-                            place.city.as_ref().is_some_and(|c| fuzzy_match(c, stored_place))
-                                || place.state.as_ref().is_some_and(|s| fuzzy_match(s, stored_place))
-                                || fuzzy_match(&place.display_name, stored_place)
-                        });
-
-                        let is_mismatch = !country_matches || place_matches == Some(false);
-
-                        if is_mismatch {
-                            mismatches += 1;
-                            eprintln!(
-                                "  {} {} ({})",
-                                "⚠".yellow(),
-                                fact_id,
-                                person_name.dimmed()
-                            );
-                            eprintln!(
-                                "    Stored:    {}, {}",
-                                location.place.as_deref().unwrap_or("-"),
-                                location.country
-                            );
-                            eprintln!(
-                                "    GPS says:  {}",
-                                place.display_name
-                            );
-                            if !country_matches {
-                                eprintln!(
-                                    "    {}",
-                                    format!(
-                                        "Country mismatch: '{}' vs '{}'",
-                                        location.country,
-                                        place.country.as_deref().unwrap_or("unknown")
-                                    ).yellow()
-                                );
-                            }
-                            eprintln!();
-                        }
-                    }
-                    Err(e) => {
-                        errors += 1;
+            let outcomes = validate_gps(&chronicle, &mut client, |outcome| match outcome {
+                GpsCheckOutcome::Checked(result) if result.is_mismatch() => {
+                    eprintln!(
+                        "  {} {} ({})",
+                        "⚠".yellow(),
+                        result.fact_id,
+                        result.person_name.dimmed()
+                    );
+                    eprintln!(
+                        "    Stored:    {}, {}",
+                        result.stored_place.as_deref().unwrap_or("-"),
+                        result.stored_country
+                    );
+                    eprintln!("    GPS says:  {}", result.nominatim_result.display_name);
+                    if !result.country_matches {
                         eprintln!(
-                            "  {} {} ({}): {}",
-                            "✗".red(),
-                            fact_id,
-                            person_name.dimmed(),
-                            e
+                            "    {}",
+                            format!(
+                                "Country mismatch: '{}' vs '{}'",
+                                result.stored_country,
+                                result.nominatim_result.country.as_deref().unwrap_or("unknown")
+                            )
+                            .yellow()
                         );
                     }
+                    eprintln!();
                 }
-            }
+                GpsCheckOutcome::Checked(_) => {}
+                GpsCheckOutcome::Failed {
+                    fact_id,
+                    person_name,
+                    error,
+                } => {
+                    eprintln!(
+                        "  {} {} ({}): {}",
+                        "✗".red(),
+                        fact_id,
+                        person_name.dimmed(),
+                        error
+                    );
+                }
+            });
 
-            // Summary
+            let mismatches = outcomes
+                .iter()
+                .filter(|o| matches!(o, GpsCheckOutcome::Checked(r) if r.is_mismatch()))
+                .count();
+            let errors = outcomes
+                .iter()
+                .filter(|o| matches!(o, GpsCheckOutcome::Failed { .. }))
+                .count();
+
             eprintln!(
                 "GPS validation: {} checked, {} mismatch(es), {} error(s)",
-                checked,
+                outcomes.len(),
                 if mismatches > 0 {
                     mismatches.to_string().yellow().to_string()
                 } else {
@@ -1029,93 +1004,43 @@ fn cmd_validate(
             eprintln!();
             eprintln!("{}", "Suggesting GPS coordinates for locations without them...".cyan());
 
-            // Collect facts with location but no coordinates (need owned data for apply)
-            let facts_without_coords: Vec<_> = chronicle
-                .persons
-                .iter()
-                .flat_map(|p| {
-                    p.facts.iter().filter_map(|f| {
-                        f.location.as_ref().and_then(|loc| {
-                            if loc.coordinates.is_none() {
-                                Some((p.name.clone(), f.id.clone(), loc.country.clone(), loc.place.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                })
-                .collect();
-
-            if facts_without_coords.is_empty() {
+            let without_coords = count_facts_without_coordinates(&chronicle);
+            if without_coords == 0 {
                 eprintln!("  No locations without GPS coordinates found.");
             } else {
                 eprintln!(
                     "  Looking up {} location(s) (1 req/sec rate limit)...",
-                    facts_without_coords.len()
+                    without_coords
                 );
                 eprintln!();
 
-                let mut suggested = 0;
-                let mut no_results = 0;
-                let mut errors = 0;
-
-                // Collect coordinates to apply (fact_id -> (lat, lon))
-                let mut coords_to_apply: Vec<(String, f64, f64)> = Vec::new();
-
-                for (person_name, fact_id, country, place) in facts_without_coords {
-                    // Build search query from place and country
-                    let query = if let Some(ref p) = place {
-                        format!("{}, {}", p, country)
-                    } else {
-                        country.clone()
-                    };
-
-                    match client.forward_geocode(&query, 3) {
-                        Ok(results) => {
-                            if results.is_empty() {
-                                no_results += 1;
+                let outcomes =
+                    suggest_coordinates(&chronicle, &mut client, 3, |outcome| match outcome {
+                        GpsSuggestOutcome::Suggested(s) => {
+                            eprintln!(
+                                "  {} {} ({})",
+                                if apply { "✓".green() } else { "→".green() },
+                                s.fact_id,
+                                s.person_name.dimmed()
+                            );
+                            eprintln!("    Query: \"{}\"", s.query);
+                            for (i, place) in s.candidates.iter().enumerate() {
+                                let marker = if i == 0 { "★" } else { "○" };
                                 eprintln!(
-                                    "  {} {} ({}): no results for \"{}\"",
-                                    "?".dimmed(),
-                                    fact_id,
-                                    person_name.dimmed(),
-                                    query
+                                    "    {} {:.6}, {:.6} - {}",
+                                    if i == 0 { marker.green() } else { marker.dimmed() },
+                                    place.lat,
+                                    place.lon,
+                                    place.display_name
                                 );
-                            } else {
-                                suggested += 1;
-
-                                // If apply is set, collect the top result
-                                if apply {
-                                    let top = &results[0];
-                                    coords_to_apply.push((fact_id.clone(), top.lat, top.lon));
-                                }
-
-                                eprintln!(
-                                    "  {} {} ({})",
-                                    if apply { "✓".green() } else { "→".green() },
-                                    fact_id,
-                                    person_name.dimmed()
-                                );
-                                eprintln!(
-                                    "    Query: \"{}\"",
-                                    query
-                                );
-
-                                for (i, place) in results.iter().enumerate() {
-                                    let marker = if i == 0 { "★" } else { "○" };
-                                    eprintln!(
-                                        "    {} {:.6}, {:.6} - {}",
-                                        if i == 0 { marker.green() } else { marker.dimmed() },
-                                        place.lat,
-                                        place.lon,
-                                        place.display_name
-                                    );
-                                }
-                                eprintln!();
                             }
+                            eprintln!();
                         }
-                        Err(kinsaga::GeocodeError::NoResults) => {
-                            no_results += 1;
+                        GpsSuggestOutcome::NoResults {
+                            fact_id,
+                            person_name,
+                            query,
+                        } => {
                             eprintln!(
                                 "  {} {} ({}): no results for \"{}\"",
                                 "?".dimmed(),
@@ -1124,20 +1049,35 @@ fn cmd_validate(
                                 query
                             );
                         }
-                        Err(e) => {
-                            errors += 1;
+                        GpsSuggestOutcome::Failed {
+                            fact_id,
+                            person_name,
+                            error,
+                            ..
+                        } => {
                             eprintln!(
                                 "  {} {} ({}): {}",
                                 "✗".red(),
                                 fact_id,
                                 person_name.dimmed(),
-                                e
+                                error
                             );
                         }
-                    }
-                }
+                    });
 
-                // Summary
+                let suggested = outcomes
+                    .iter()
+                    .filter(|o| matches!(o, GpsSuggestOutcome::Suggested(_)))
+                    .count();
+                let no_results = outcomes
+                    .iter()
+                    .filter(|o| matches!(o, GpsSuggestOutcome::NoResults { .. }))
+                    .count();
+                let errors = outcomes
+                    .iter()
+                    .filter(|o| matches!(o, GpsSuggestOutcome::Failed { .. }))
+                    .count();
+
                 eprintln!();
                 eprintln!(
                     "GPS suggestions: {} found, {} no results, {} error(s)",
@@ -1154,27 +1094,23 @@ fn cmd_validate(
                     }
                 );
 
-                // Apply coordinates if --apply flag is set
-                if apply && !coords_to_apply.is_empty() {
-                    let mut applied = 0;
-                    for (fact_id, lat, lon) in &coords_to_apply {
-                        // Find and update the fact
-                        for person in &mut chronicle.persons {
-                            for fact in &mut person.facts {
-                                if &fact.id == fact_id
-                                    && let Some(ref mut location) = fact.location
-                                {
-                                    location.coordinates = Some(Coordinates::new(*lat, *lon));
-                                    applied += 1;
-                                }
-                            }
+                // Apply the top suggestion of each lookup if --apply is set
+                if apply {
+                    let suggestions: Vec<_> = outcomes
+                        .into_iter()
+                        .filter_map(|o| match o {
+                            GpsSuggestOutcome::Suggested(s) => Some(s),
+                            _ => None,
+                        })
+                        .collect();
+                    if !suggestions.is_empty() {
+                        let applied = apply_suggestions(&mut chronicle, &suggestions);
+                        if applied > 0 {
+                            modified = true;
                         }
+                        eprintln!();
+                        eprintln!("{}", format!("✓ Applied {} coordinate(s)", applied).green());
                     }
-                    if applied > 0 {
-                        modified = true;
-                    }
-                    eprintln!();
-                    eprintln!("{}", format!("✓ Applied {} coordinate(s)", applied).green());
                 }
             }
         }
