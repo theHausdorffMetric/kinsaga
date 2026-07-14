@@ -132,8 +132,20 @@ impl PartialOrd for ChronicleDate {
 }
 
 impl Ord for ChronicleDate {
+    /// Orders chronologically by [`sort_key`](Self::sort_key); sort-key ties
+    /// (e.g. "1987" vs "1987?") are broken by the remaining fields so that
+    /// `cmp` returning `Equal` coincides exactly with `==`, as the `Ord`
+    /// contract requires.
     fn cmp(&self, other: &Self) -> Ordering {
-        self.sort_key().cmp(&other.sort_key())
+        self.sort_key().cmp(&other.sort_key()).then_with(|| {
+            (self.year, self.month, self.day, self.uncertain, &self.raw).cmp(&(
+                other.year,
+                other.month,
+                other.day,
+                other.uncertain,
+                &other.raw,
+            ))
+        })
     }
 }
 
@@ -224,6 +236,21 @@ mod tests {
         assert!(d1 < d2);
         assert!(d2 < d3);
         assert!(d3 < d4);
+    }
+
+    #[test]
+    fn test_ord_consistent_with_eq() {
+        let certain = ChronicleDate::parse("1987").unwrap();
+        let uncertain = ChronicleDate::parse("1987?").unwrap();
+
+        // Same sort key, but not equal — cmp must not return Equal
+        assert_ne!(certain, uncertain);
+        assert_ne!(certain.cmp(&uncertain), Ordering::Equal);
+        assert!(certain < uncertain, "certain date sorts before uncertain on ties");
+
+        let same = ChronicleDate::parse("1987").unwrap();
+        assert_eq!(certain, same);
+        assert_eq!(certain.cmp(&same), Ordering::Equal);
     }
 
     #[test]
