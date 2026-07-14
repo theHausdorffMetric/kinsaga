@@ -149,6 +149,20 @@ impl Ord for ChronicleDate {
     }
 }
 
+/// Compare two raw date strings chronologically.
+///
+/// This is the single source of truth for date ordering: unparseable dates
+/// sort after parseable ones, and two unparseable dates compare by their
+/// raw string so the order stays deterministic.
+pub fn cmp_date_strings(a: &str, b: &str) -> Ordering {
+    match (ChronicleDate::parse(a).ok(), ChronicleDate::parse(b).ok()) {
+        (Some(da), Some(db)) => da.cmp(&db),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.cmp(b),
+    }
+}
+
 fn parse_year(s: &str) -> Result<u16, DateError> {
     s.parse::<u16>()
         .map_err(|_| DateError::InvalidYear(s.to_string()))
@@ -257,6 +271,18 @@ mod tests {
     fn test_display() {
         let date = ChronicleDate::parse("1987-03?").unwrap();
         assert_eq!(format!("{}", date), "1987-03?");
+    }
+
+    #[test]
+    fn test_cmp_date_strings_unparseable_last() {
+        assert_eq!(cmp_date_strings("1990", "2000"), Ordering::Less);
+        assert_eq!(cmp_date_strings("2000", "1990"), Ordering::Greater);
+        assert_eq!(cmp_date_strings("1990", "1990"), Ordering::Equal);
+        // Unparseable dates always sort last
+        assert_eq!(cmp_date_strings("garbage", "1990"), Ordering::Greater);
+        assert_eq!(cmp_date_strings("1990", "garbage"), Ordering::Less);
+        // Two unparseable dates order deterministically by raw string
+        assert_eq!(cmp_date_strings("aaa", "bbb"), Ordering::Less);
     }
 
     #[test]

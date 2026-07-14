@@ -296,12 +296,8 @@ pub fn collect_timeline_facts<'a>(
         }
     }
 
-    // Sort by date
-    all_facts.sort_by(|a, b| {
-        let date_a = ChronicleDate::parse(&a.fact.date).ok();
-        let date_b = ChronicleDate::parse(&b.fact.date).ok();
-        date_a.cmp(&date_b)
-    });
+    // Sort by date (unparseable dates last, same order as sort_facts_by_date)
+    all_facts.sort_by(|a, b| crate::date::cmp_date_strings(&a.fact.date, &b.fact.date));
 
     all_facts
 }

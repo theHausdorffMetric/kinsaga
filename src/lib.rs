@@ -43,7 +43,7 @@ pub mod merge;
 pub mod model;
 pub mod validate;
 
-pub use date::{ChronicleDate, DateError};
+pub use date::{cmp_date_strings, ChronicleDate, DateError};
 pub use facts::{
     add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
     AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions, EditFactResult,

@@ -691,7 +691,13 @@ struct TimelineFactJson {
 fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: bool) -> Result<()> {
     let chronicle = load(file).context("Failed to load chronicle")?;
 
-    let filter = FactFilter::new().with_text(query).with_regex(use_regex);
+    let filter = if use_regex {
+        FactFilter::new()
+            .with_regex_text(query)
+            .map_err(|e| anyhow::anyhow!("Invalid regex pattern '{}': {}", query, e))?
+    } else {
+        FactFilter::new().with_text(query)
+    };
     let results = search(&chronicle, &filter);
 
     // No early return on empty results: csv/md/json must still emit their

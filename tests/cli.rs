@@ -222,6 +222,15 @@ fn search_json_with_no_results_emits_empty_array() {
 }
 
 #[test]
+fn search_invalid_regex_reports_error() {
+    kinsaga()
+        .args(["-i", SAMPLE, "search", "[invalid", "--regex"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid regex"));
+}
+
+#[test]
 fn search_csv_with_no_results_emits_header() {
     kinsaga()
         .args(["-i", SAMPLE, "search", "zzz-no-match", "-f", "csv"])

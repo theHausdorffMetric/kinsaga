@@ -1,8 +1,17 @@
 //! Search and filter functionality for chronicles.
 
-use crate::date::ChronicleDate;
+use crate::date::{cmp_date_strings, ChronicleDate};
 use crate::{Chronicle, Fact, Person};
 use regex::Regex;
+
+/// Text matching mode for a filter.
+#[derive(Debug, Clone)]
+enum TextFilter {
+    /// Case-insensitive substring match (stored lowercased)
+    Substring(String),
+    /// Case-insensitive regex match, compiled once when the filter is built
+    Pattern(Regex),
+}
 
 /// A filter for querying facts.
 #[derive(Debug, Default, Clone)]
@@ -16,11 +25,8 @@ pub struct FactFilter {
     /// Filter by maximum year (inclusive)
     pub to_year: Option<u16>,
 
-    /// Filter by text content (case-insensitive substring match, or regex if enabled)
-    pub text: Option<String>,
-
-    /// If true, treat text as a regex pattern
-    pub use_regex: bool,
+    /// Text filter (substring or precompiled regex)
+    text: Option<TextFilter>,
 }
 
 impl FactFilter {
@@ -47,16 +53,20 @@ impl FactFilter {
         self
     }
 
-    /// Filter by text content.
+    /// Filter by text content (case-insensitive substring match).
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
-        self.text = Some(text.into());
+        self.text = Some(TextFilter::Substring(text.into().to_lowercase()));
         self
     }
 
-    /// Enable regex mode for text matching.
-    pub fn with_regex(mut self, enabled: bool) -> Self {
-        self.use_regex = enabled;
-        self
+    /// Filter by a regex pattern (case-insensitive).
+    ///
+    /// The pattern is compiled once here; an invalid pattern is an error
+    /// instead of silently matching nothing.
+    pub fn with_regex_text(mut self, pattern: &str) -> Result<Self, regex::Error> {
+        let regex = Regex::new(&format!("(?i){}", pattern))?;
+        self.text = Some(TextFilter::Pattern(regex));
+        Ok(self)
     }
 
     /// Check if a fact matches this filter.
@@ -68,27 +78,30 @@ impl FactFilter {
             return false;
         }
 
-        // Parse the date for year filtering
-        if (self.from_year.is_some() || self.to_year.is_some())
-            && let Ok(date) = ChronicleDate::parse(&fact.date)
-            && let Some(year) = date.year
-        {
-            if let Some(from) = self.from_year
-                && year < from
-            {
-                return false;
-            }
-            if let Some(to) = self.to_year
-                && year > to
-            {
-                return false;
+        // Year filtering: when a year range is set, facts whose date cannot
+        // be parsed are excluded — they cannot be placed in the range
+        if self.from_year.is_some() || self.to_year.is_some() {
+            match ChronicleDate::parse(&fact.date).ok().and_then(|d| d.year) {
+                Some(year) => {
+                    if let Some(from) = self.from_year
+                        && year < from
+                    {
+                        return false;
+                    }
+                    if let Some(to) = self.to_year
+                        && year > to
+                    {
+                        return false;
+                    }
+                }
+                None => return false,
             }
         }
 
         // Text filter (case-insensitive) - searches across all text fields combined
         // This allows regex patterns to match across fields (e.g., "foo.*bar" matches
         // if "foo" is in text and "bar" is in location)
-        if let Some(ref pattern) = self.text {
+        if let Some(ref text_filter) = self.text {
             // Build combined searchable text from all fields
             let mut combined = fact.text.clone();
             if let Some(ref loc) = fact.location {
@@ -106,13 +119,9 @@ impl FactFilter {
                 }
             }
 
-            let matches = if self.use_regex {
-                let regex_pattern = format!("(?i){}", pattern);
-                Regex::new(&regex_pattern)
-                    .map(|re| re.is_match(&combined))
-                    .unwrap_or(false)
-            } else {
-                combined.to_lowercase().contains(&pattern.to_lowercase())
+            let matches = match text_filter {
+                TextFilter::Substring(needle) => combined.to_lowercase().contains(needle),
+                TextFilter::Pattern(regex) => regex.is_match(&combined),
             };
 
             if !matches {
@@ -154,18 +163,9 @@ pub fn search<'a>(chronicle: &'a Chronicle, filter: &FactFilter) -> Vec<SearchRe
     results
 }
 
-/// Sort facts by date.
+/// Sort facts by date. Facts with unparseable dates sort last.
 pub fn sort_facts_by_date(facts: &mut [&Fact]) {
-    facts.sort_by(|a, b| {
-        let date_a = ChronicleDate::parse(&a.date).ok();
-        let date_b = ChronicleDate::parse(&b.date).ok();
-        match (date_a, date_b) {
-            (Some(a), Some(b)) => a.cmp(&b),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
-    });
+    facts.sort_by(|a, b| cmp_date_strings(&a.date, &b.date));
 }
 
 #[cfg(test)]
@@ -294,8 +294,8 @@ mod tests {
         let chronicle = sample_chronicle();
         // Match "Springfield" OR "Shelbyville" using regex OR
         let filter = FactFilter::new()
-            .with_text("springfield|shelbyville")
-            .with_regex(true);
+            .with_regex_text("springfield|shelbyville")
+            .unwrap();
 
         let results = search(&chronicle, &filter);
         assert_eq!(results.len(), 2); // One from Alice, one from Bob
@@ -305,9 +305,7 @@ mod tests {
     fn test_regex_case_insensitive() {
         let chronicle = sample_chronicle();
         // Regex should be case-insensitive
-        let filter = FactFilter::new()
-            .with_text("SPRINGFIELD")
-            .with_regex(true);
+        let filter = FactFilter::new().with_regex_text("SPRINGFIELD").unwrap();
 
         let results = search(&chronicle, &filter);
         assert_eq!(results.len(), 1);
@@ -317,24 +315,52 @@ mod tests {
     fn test_regex_word_boundary() {
         let chronicle = sample_chronicle();
         // Match "New" as word start
-        let filter = FactFilter::new()
-            .with_text(r"\bNew\b")
-            .with_regex(true);
+        let filter = FactFilter::new().with_regex_text(r"\bNew\b").unwrap();
 
         let results = search(&chronicle, &filter);
         assert_eq!(results.len(), 2); // "New York" appears twice
     }
 
     #[test]
-    fn test_regex_invalid_pattern() {
-        let chronicle = sample_chronicle();
-        // Invalid regex should match nothing
-        let filter = FactFilter::new()
-            .with_text("[invalid")
-            .with_regex(true);
+    fn test_regex_invalid_pattern_is_error() {
+        // An invalid pattern is a build-time error, not a silent no-match
+        assert!(FactFilter::new().with_regex_text("[invalid").is_err());
+    }
 
-        let results = search(&chronicle, &filter);
-        assert_eq!(results.len(), 0);
+    #[test]
+    fn test_year_filter_excludes_unparseable_dates() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        let mut alice = Person::new("alice", "Alice");
+        alice
+            .facts
+            .push(Fact::new("1", "not-a-date", "family", "Broken date"));
+        alice.facts.push(Fact::new("2", "2010", "family", "Good date"));
+        chronicle.persons.push(alice);
+
+        let alice = chronicle.find_person("alice").unwrap();
+        // Without a year filter both facts pass
+        assert_eq!(filter_facts(alice, &FactFilter::new()).len(), 2);
+        // With a year filter, the unparseable date cannot be placed in
+        // the range and is excluded
+        let filter = FactFilter::new().from_year(2000);
+        let facts = filter_facts(alice, &filter);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].text, "Good date");
+    }
+
+    #[test]
+    fn test_sort_unparseable_dates_last() {
+        let broken = Fact::new("1", "someday", "family", "Broken");
+        let old = Fact::new("2", "1990", "family", "Old");
+        let new = Fact::new("3", "2020", "family", "New");
+
+        let mut facts: Vec<&Fact> = vec![&broken, &new, &old];
+        sort_facts_by_date(&mut facts);
+
+        assert_eq!(facts[0].text, "Old");
+        assert_eq!(facts[1].text, "New");
+        assert_eq!(facts[2].text, "Broken");
     }
 
     #[test]
@@ -352,8 +378,8 @@ mod tests {
 
         // Match "Smilla" in text AND "Mettmen" in location using regex
         let filter = FactFilter::new()
-            .with_text("smilla.*mettmen|mettmen.*smilla")
-            .with_regex(true);
+            .with_regex_text("smilla.*mettmen|mettmen.*smilla")
+            .unwrap();
 
         let results = search(&chronicle, &filter);
         assert_eq!(results.len(), 1);
@@ -363,9 +389,7 @@ mod tests {
         assert_eq!(search(&chronicle, &filter2).len(), 1);
 
         // Non-matching cross-field
-        let filter3 = FactFilter::new()
-            .with_text("smilla.*zurich")
-            .with_regex(true);
+        let filter3 = FactFilter::new().with_regex_text("smilla.*zurich").unwrap();
         assert_eq!(search(&chronicle, &filter3).len(), 0);
     }
 }
