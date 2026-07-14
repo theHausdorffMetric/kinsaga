@@ -272,7 +272,10 @@ mod tests {
         // Same sort key, but not equal — cmp must not return Equal
         assert_ne!(certain, uncertain);
         assert_ne!(certain.cmp(&uncertain), Ordering::Equal);
-        assert!(certain < uncertain, "certain date sorts before uncertain on ties");
+        assert!(
+            certain < uncertain,
+            "certain date sorts before uncertain on ties"
+        );
 
         let same = ChronicleDate::parse("1987").unwrap();
         assert_eq!(certain, same);

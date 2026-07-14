@@ -78,7 +78,9 @@ pub fn escape_csv(s: &str) -> String {
 /// Pipes are escaped and newlines become `<br>` so multi-line text
 /// cannot break the table structure.
 pub fn escape_md(s: &str) -> String {
-    s.replace('|', "\\|").replace('\r', "").replace('\n', "<br>")
+    s.replace('|', "\\|")
+        .replace('\r', "")
+        .replace('\n', "<br>")
 }
 
 /// Parse a `#RRGGBB` hex color into an `(r, g, b)` triple.
@@ -115,7 +117,10 @@ mod tests {
         let loc = Location::new("France")
             .with_place("Eiffel Tower, Paris")
             .with_coordinates(Coordinates::new(48.8566, 2.3522));
-        assert_eq!(format_location(&loc), "Eiffel Tower, Paris, France, (48.8566, 2.3522)");
+        assert_eq!(
+            format_location(&loc),
+            "Eiffel Tower, Paris, France, (48.8566, 2.3522)"
+        );
     }
 
     #[test]

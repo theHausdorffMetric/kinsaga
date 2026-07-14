@@ -44,32 +44,32 @@ pub mod model;
 pub mod persons;
 pub mod validate;
 
-pub use date::{cmp_date_strings, ChronicleDate, DateError};
+pub use date::{ChronicleDate, DateError, cmp_date_strings};
 pub use facts::{
-    add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
-    remove_fact, AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions,
-    EditFactResult, FactError, LocationUpdate, RemoveFactResult, TimelineFact, WithUpdate,
+    AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions, EditFactResult, FactError,
+    LocationUpdate, RemoveFactResult, TimelineFact, WithUpdate, add_fact, build_attachments,
+    build_location, collect_timeline_facts, edit_fact, remove_fact,
 };
-pub use filter::{filter_facts, search, FactFilter, SearchResult};
+pub use filter::{FactFilter, SearchResult, filter_facts, search};
 pub use format::{
     escape_csv, escape_md, format_attachment, format_attachment_markdown, format_date_display,
     format_location, parse_hex_color, truncate_text,
 };
 pub use geocode::{
-    apply_suggestions, count_facts_with_coordinates, count_facts_without_coordinates,
-    fuzzy_match, suggest_coordinates, validate_gps, GeocodedPlace, GeocodeError,
-    GpsCheckOutcome, GpsSuggestion, GpsSuggestOutcome, GpsValidationResult, NominatimClient,
+    GeocodeError, GeocodedPlace, GpsCheckOutcome, GpsSuggestOutcome, GpsSuggestion,
+    GpsValidationResult, NominatimClient, apply_suggestions, count_facts_with_coordinates,
+    count_facts_without_coordinates, fuzzy_match, suggest_coordinates, validate_gps,
 };
-pub use io::{from_json, load, save, to_json, IoError};
+pub use io::{IoError, from_json, load, save, to_json};
 pub use merge::{
-    merge_chronicles, ConflictStrategy, DuplicateStrategy, MergeError, MergeEvent,
-    MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats,
+    ConflictStrategy, DuplicateStrategy, MergeError, MergeEvent, MergeEventType, MergeItemType,
+    MergeOptions, MergeResult, MergeStats, merge_chronicles,
 };
 pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};
-pub use persons::{add_person, remove_person, PersonError, RemovePersonResult};
+pub use persons::{PersonError, RemovePersonResult, add_person, remove_person};
 pub use validate::{
-    correct_uuids, is_valid_id, is_valid_mime_type, validate_chronicle, IssueType,
-    ValidationIssue, ValidationResult,
+    IssueType, ValidationIssue, ValidationResult, correct_uuids, is_valid_id, is_valid_mime_type,
+    validate_chronicle,
 };
 
 // Re-export url::Url for convenience

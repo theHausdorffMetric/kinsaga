@@ -147,7 +147,9 @@ pub fn merge_chronicles(
                         stats.categories_skipped += 1;
                     }
                     ConflictStrategy::Overwrite => {
-                        if let Some(cat) = target.categories.iter_mut().find(|c| c.id == source_cat.id) {
+                        if let Some(cat) =
+                            target.categories.iter_mut().find(|c| c.id == source_cat.id)
+                        {
                             cat.label = source_cat.label.clone();
                             cat.color = source_cat.color.clone();
                         }
@@ -261,14 +263,15 @@ pub fn merge_chronicles(
                 }
 
                 // Determine UUID
-                let new_uuid = if options.regenerate_uuids || existing_uuids.contains(&source_fact.id) {
-                    let uuid = Uuid::new_v4().to_string();
-                    existing_uuids.insert(uuid.clone());
-                    uuid
-                } else {
-                    existing_uuids.insert(source_fact.id.clone());
-                    source_fact.id.clone()
-                };
+                let new_uuid =
+                    if options.regenerate_uuids || existing_uuids.contains(&source_fact.id) {
+                        let uuid = Uuid::new_v4().to_string();
+                        existing_uuids.insert(uuid.clone());
+                        uuid
+                    } else {
+                        existing_uuids.insert(source_fact.id.clone());
+                        source_fact.id.clone()
+                    };
 
                 // Clone the fact wholesale so any future Fact fields
                 // survive merges, then set the (possibly new) UUID
@@ -415,10 +418,14 @@ mod tests {
     #[test]
     fn test_merge_category_conflict_skip() {
         let mut target = Chronicle::new("1.0");
-        target.categories.push(Category::new("family", "Family Target"));
+        target
+            .categories
+            .push(Category::new("family", "Family Target"));
 
         let mut source = Chronicle::new("1.0");
-        source.categories.push(Category::new("family", "Family Source"));
+        source
+            .categories
+            .push(Category::new("family", "Family Source"));
 
         let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
 
@@ -430,10 +437,14 @@ mod tests {
     #[test]
     fn test_merge_category_conflict_overwrite() {
         let mut target = Chronicle::new("1.0");
-        target.categories.push(Category::new("family", "Family Target"));
+        target
+            .categories
+            .push(Category::new("family", "Family Target"));
 
         let mut source = Chronicle::new("1.0");
-        source.categories.push(Category::new("family", "Family Source"));
+        source
+            .categories
+            .push(Category::new("family", "Family Source"));
 
         let options = MergeOptions {
             on_conflict: ConflictStrategy::Overwrite,
@@ -448,10 +459,14 @@ mod tests {
     #[test]
     fn test_merge_category_conflict_fail() {
         let mut target = Chronicle::new("1.0");
-        target.categories.push(Category::new("family", "Family Target"));
+        target
+            .categories
+            .push(Category::new("family", "Family Target"));
 
         let mut source = Chronicle::new("1.0");
-        source.categories.push(Category::new("family", "Family Source"));
+        source
+            .categories
+            .push(Category::new("family", "Family Source"));
 
         let options = MergeOptions {
             on_conflict: ConflictStrategy::Fail,
@@ -467,13 +482,17 @@ mod tests {
         let mut target = Chronicle::new("1.0");
         target.categories.push(Category::new("family", "Family"));
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new("uuid-1", "2020-01-01", "family", "Same event"));
+        person
+            .facts
+            .push(Fact::new("uuid-1", "2020-01-01", "family", "Same event"));
         target.persons.push(person);
 
         let mut source = Chronicle::new("1.0");
         source.categories.push(Category::new("family", "Family"));
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new("uuid-2", "2020-01-01", "family", "Same event"));
+        person
+            .facts
+            .push(Fact::new("uuid-2", "2020-01-01", "family", "Same event"));
         source.persons.push(person);
 
         let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
@@ -490,9 +509,11 @@ mod tests {
         let mut source = Chronicle::new("1.0");
         source.categories.push(Category::new("family", "Family"));
         let mut p1 = Person::new("alice", "Alice");
-        p1.facts.push(Fact::new("uuid-1", "2020-01-01", "family", "Event 1"));
+        p1.facts
+            .push(Fact::new("uuid-1", "2020-01-01", "family", "Event 1"));
         let mut p2 = Person::new("alice", "Alice");
-        p2.facts.push(Fact::new("uuid-2", "2020-01-02", "family", "Event 2"));
+        p2.facts
+            .push(Fact::new("uuid-2", "2020-01-02", "family", "Event 2"));
         source.persons.push(p1);
         source.persons.push(p2);
 
@@ -531,9 +552,7 @@ mod tests {
             )
             .with_persons(vec!["alice".to_string()])
             .with_location(Location::new("France").with_place("Paris"))
-            .with_attachment(
-                Attachment::new("https://example.com/photo.jpg").with_title("Photo"),
-            ),
+            .with_attachment(Attachment::new("https://example.com/photo.jpg").with_title("Photo")),
         );
         source.persons.push(alice);
 

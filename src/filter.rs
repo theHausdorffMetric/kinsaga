@@ -1,6 +1,6 @@
 //! Search and filter functionality for chronicles.
 
-use crate::date::{cmp_date_strings, ChronicleDate};
+use crate::date::{ChronicleDate, cmp_date_strings};
 use crate::{Chronicle, Fact, Person};
 use regex::Regex;
 
@@ -182,9 +182,12 @@ mod tests {
         chronicle.categories.push(Category::new("travel", "Travel"));
 
         let mut alice = Person::new("alice", "Alice Smith");
-        alice
-            .facts
-            .push(Fact::new("1", "1990-05-15", "family", "Born in Springfield"));
+        alice.facts.push(Fact::new(
+            "1",
+            "1990-05-15",
+            "family",
+            "Born in Springfield",
+        ));
         alice
             .facts
             .push(Fact::new("2", "2001", "education", "Started high school"));
@@ -200,15 +203,14 @@ mod tests {
         chronicle.persons.push(alice);
 
         let mut bob = Person::new("bob", "Bob Johnson");
-        bob
-            .facts
-            .push(Fact::new("5", "1988-03-22", "family", "Born in Shelbyville"));
         bob.facts.push(Fact::new(
-            "6",
-            "2020",
-            "travel",
-            "New York vacation trip",
+            "5",
+            "1988-03-22",
+            "family",
+            "Born in Shelbyville",
         ));
+        bob.facts
+            .push(Fact::new("6", "2020", "travel", "New York vacation trip"));
         chronicle.persons.push(bob);
 
         chronicle
@@ -263,9 +265,7 @@ mod tests {
     #[test]
     fn test_combined_filters() {
         let chronicle = sample_chronicle();
-        let filter = FactFilter::new()
-            .with_category("education")
-            .from_year(2005);
+        let filter = FactFilter::new().with_category("education").from_year(2005);
 
         let alice = chronicle.find_person("alice").unwrap();
         let facts = filter_facts(alice, &filter);
@@ -335,7 +335,9 @@ mod tests {
         alice
             .facts
             .push(Fact::new("1", "not-a-date", "family", "Broken date"));
-        alice.facts.push(Fact::new("2", "2010", "family", "Good date"));
+        alice
+            .facts
+            .push(Fact::new("2", "2010", "family", "Good date"));
         chronicle.persons.push(alice);
 
         let alice = chronicle.find_person("alice").unwrap();

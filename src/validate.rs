@@ -41,7 +41,9 @@ impl IssueType {
     pub fn is_error(&self) -> bool {
         matches!(
             self,
-            IssueType::DuplicateUuid | IssueType::DuplicatePersonId | IssueType::DuplicateCategoryId
+            IssueType::DuplicateUuid
+                | IssueType::DuplicatePersonId
+                | IssueType::DuplicateCategoryId
         )
     }
 }
@@ -141,23 +143,37 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                     message: format!("Empty UUID for fact '{}'", truncate_text(&fact.text, 30)),
                     issue_type: IssueType::EmptyUuid,
                 });
-                result.needs_correction.push((person.id.clone(), fact.id.clone()));
+                result
+                    .needs_correction
+                    .push((person.id.clone(), fact.id.clone()));
             } else if Uuid::parse_str(&fact.id).is_err() {
                 result.warnings.push(ValidationIssue {
                     person_id: person.id.clone(),
                     fact_id: Some(fact.id.clone()),
-                    message: format!("Invalid UUID format '{}' for fact '{}'", fact.id, truncate_text(&fact.text, 30)),
+                    message: format!(
+                        "Invalid UUID format '{}' for fact '{}'",
+                        fact.id,
+                        truncate_text(&fact.text, 30)
+                    ),
                     issue_type: IssueType::InvalidUuid,
                 });
-                result.needs_correction.push((person.id.clone(), fact.id.clone()));
+                result
+                    .needs_correction
+                    .push((person.id.clone(), fact.id.clone()));
             } else if seen_uuids.contains(&fact.id) {
                 result.errors.push(ValidationIssue {
                     person_id: person.id.clone(),
                     fact_id: Some(fact.id.clone()),
-                    message: format!("Duplicate UUID '{}' for fact '{}'", fact.id, truncate_text(&fact.text, 30)),
+                    message: format!(
+                        "Duplicate UUID '{}' for fact '{}'",
+                        fact.id,
+                        truncate_text(&fact.text, 30)
+                    ),
                     issue_type: IssueType::DuplicateUuid,
                 });
-                result.needs_correction.push((person.id.clone(), fact.id.clone()));
+                result
+                    .needs_correction
+                    .push((person.id.clone(), fact.id.clone()));
             } else {
                 seen_uuids.insert(fact.id.clone());
             }
@@ -244,7 +260,8 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                         fact_id: Some(fact.id.clone()),
                         message: format!(
                             "Attachment {}: invalid MIME type '{}' (expected format: type/subtype)",
-                            i + 1, content_type
+                            i + 1,
+                            content_type
                         ),
                         issue_type: IssueType::InvalidMimeType,
                     });
@@ -390,7 +407,9 @@ mod tests {
         chronicle.categories.push(Category::new("family", "Family"));
 
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new("not-a-uuid", "2020-01-01", "family", "Test"));
+        person
+            .facts
+            .push(Fact::new("not-a-uuid", "2020-01-01", "family", "Test"));
         chronicle.persons.push(person);
 
         let result = validate_chronicle(&chronicle);
@@ -406,8 +425,12 @@ mod tests {
 
         let uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new(uuid, "2020-01-01", "family", "Event 1"));
-        person.facts.push(Fact::new(uuid, "2020-01-02", "family", "Event 2"));
+        person
+            .facts
+            .push(Fact::new(uuid, "2020-01-01", "family", "Event 1"));
+        person
+            .facts
+            .push(Fact::new(uuid, "2020-01-02", "family", "Event 2"));
         chronicle.persons.push(person);
 
         let result = validate_chronicle(&chronicle);
@@ -434,30 +457,38 @@ mod tests {
 
         let chronicle = crate::io::from_json(json).expect("must load despite bad URL");
         let result = validate_chronicle(&chronicle);
-        assert!(result
-            .warnings
-            .iter()
-            .any(|i| i.issue_type == IssueType::InvalidUrl));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|i| i.issue_type == IssueType::InvalidUrl)
+        );
     }
 
     #[test]
     fn test_validate_duplicate_person_and_category_ids() {
         let mut chronicle = Chronicle::new("1.0");
         chronicle.categories.push(Category::new("family", "Family"));
-        chronicle.categories.push(Category::new("family", "Family 2"));
+        chronicle
+            .categories
+            .push(Category::new("family", "Family 2"));
         chronicle.persons.push(Person::new("alice", "Alice"));
         chronicle.persons.push(Person::new("alice", "Alice 2"));
 
         let result = validate_chronicle(&chronicle);
         assert!(!result.has_no_errors());
-        assert!(result
-            .errors
-            .iter()
-            .any(|i| i.issue_type == IssueType::DuplicateCategoryId));
-        assert!(result
-            .errors
-            .iter()
-            .any(|i| i.issue_type == IssueType::DuplicatePersonId));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|i| i.issue_type == IssueType::DuplicateCategoryId)
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|i| i.issue_type == IssueType::DuplicatePersonId)
+        );
     }
 
     #[test]
@@ -466,7 +497,9 @@ mod tests {
         chronicle.categories.push(Category::new("family", "Family"));
 
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new("invalid", "2020-01-01", "family", "Test"));
+        person
+            .facts
+            .push(Fact::new("invalid", "2020-01-01", "family", "Test"));
         chronicle.persons.push(person);
 
         let corrections = vec![("alice".to_string(), "invalid".to_string())];
@@ -483,8 +516,12 @@ mod tests {
 
         let uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new(uuid, "2020-01-01", "family", "Event 1"));
-        person.facts.push(Fact::new(uuid, "2020-01-02", "family", "Event 2"));
+        person
+            .facts
+            .push(Fact::new(uuid, "2020-01-01", "family", "Event 1"));
+        person
+            .facts
+            .push(Fact::new(uuid, "2020-01-02", "family", "Event 2"));
         chronicle.persons.push(person);
 
         let result = validate_chronicle(&chronicle);
@@ -503,17 +540,23 @@ mod tests {
 
         let uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let mut alice = Person::new("alice", "Alice");
-        alice.facts.push(Fact::new(uuid, "2020-01-01", "family", "Alice event"));
+        alice
+            .facts
+            .push(Fact::new(uuid, "2020-01-01", "family", "Alice event"));
         chronicle.persons.push(alice);
         let mut bob = Person::new("bob", "Bob");
-        bob.facts.push(Fact::new(uuid, "2020-01-02", "family", "Bob event"));
+        bob.facts
+            .push(Fact::new(uuid, "2020-01-02", "family", "Bob event"));
         chronicle.persons.push(bob);
 
         let result = validate_chronicle(&chronicle);
         let fixed = correct_uuids(chronicle, &result.needs_correction);
 
         assert_eq!(fixed.persons[0].facts[0].id, uuid, "Alice keeps her UUID");
-        assert_ne!(fixed.persons[1].facts[0].id, uuid, "Bob's duplicate is regenerated");
+        assert_ne!(
+            fixed.persons[1].facts[0].id, uuid,
+            "Bob's duplicate is regenerated"
+        );
     }
 
     #[test]
@@ -522,8 +565,12 @@ mod tests {
         chronicle.categories.push(Category::new("family", "Family"));
 
         let mut person = Person::new("alice", "Alice");
-        person.facts.push(Fact::new("", "2020-01-01", "family", "Event 1"));
-        person.facts.push(Fact::new("", "2020-01-02", "family", "Event 2"));
+        person
+            .facts
+            .push(Fact::new("", "2020-01-01", "family", "Event 1"));
+        person
+            .facts
+            .push(Fact::new("", "2020-01-02", "family", "Event 2"));
         chronicle.persons.push(person);
 
         let result = validate_chronicle(&chronicle);

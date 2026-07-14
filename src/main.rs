@@ -4,13 +4,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use kinsaga::{
-    add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
-    correct_uuids, escape_csv, escape_md, format_attachment, format_attachment_markdown,
-    format_date_display, format_location, load, merge_chronicles, parse_hex_color, save,
-    search, validate_chronicle,
-    AddFactOptions, AttachmentUpdate, Chronicle, ChronicleDate, EditFactOptions, Fact,
-    FactFilter, IssueType, LocationUpdate, MergeOptions, WithUpdate,
+    AddFactOptions, AttachmentUpdate, Chronicle, ChronicleDate,
     ConflictStrategy as LibConflictStrategy, DuplicateStrategy as LibDuplicateStrategy,
+    EditFactOptions, Fact, FactFilter, IssueType, LocationUpdate, MergeOptions, WithUpdate,
+    add_fact, build_attachments, build_location, collect_timeline_facts, correct_uuids, edit_fact,
+    escape_csv, escape_md, format_attachment, format_attachment_markdown, format_date_display,
+    format_location, load, merge_chronicles, parse_hex_color, save, search, validate_chronicle,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -249,15 +248,27 @@ enum Commands {
         add_attachments: Option<Vec<String>>,
 
         /// MIME content type for added attachments (requires --add-attach)
-        #[arg(long = "attach-type", value_name = "MIME", requires = "add_attachments")]
+        #[arg(
+            long = "attach-type",
+            value_name = "MIME",
+            requires = "add_attachments"
+        )]
         attach_type: Option<String>,
 
         /// Title/description for added attachments (requires --add-attach)
-        #[arg(long = "attach-title", value_name = "TITLE", requires = "add_attachments")]
+        #[arg(
+            long = "attach-title",
+            value_name = "TITLE",
+            requires = "add_attachments"
+        )]
         attach_title: Option<String>,
 
         /// Remove attachment by URL
-        #[arg(long = "remove-attach", value_name = "URL", conflicts_with = "clear_attachments")]
+        #[arg(
+            long = "remove-attach",
+            value_name = "URL",
+            conflicts_with = "clear_attachments"
+        )]
         remove_attachments: Option<Vec<String>>,
 
         /// Clear all attachments
@@ -362,8 +373,19 @@ fn main() -> Result<()> {
             to,
             include_shared,
         } => cmd_timeline(&input, &person, &format, category, from, to, include_shared),
-        Commands::Search { query, format, regex } => cmd_search(&input, &query, &format, regex),
-        Commands::Validate { correct, in_place, gps, suggest, apply, strict } => cmd_validate(&input, correct, in_place, gps, suggest, apply, strict),
+        Commands::Search {
+            query,
+            format,
+            regex,
+        } => cmd_search(&input, &query, &format, regex),
+        Commands::Validate {
+            correct,
+            in_place,
+            gps,
+            suggest,
+            apply,
+            strict,
+        } => cmd_validate(&input, correct, in_place, gps, suggest, apply, strict),
         Commands::AddFact {
             person,
             date,
@@ -402,7 +424,14 @@ fn main() -> Result<()> {
             on_conflict,
             duplicates,
             regenerate_uuids,
-        } => cmd_merge(&input, &source, dry_run, on_conflict, duplicates, regenerate_uuids),
+        } => cmd_merge(
+            &input,
+            &source,
+            dry_run,
+            on_conflict,
+            duplicates,
+            regenerate_uuids,
+        ),
         Commands::EditFact {
             uuid,
             date,
@@ -554,7 +583,11 @@ fn cmd_timeline(
     let category_colors: HashMap<&str, &str> = chronicle
         .categories
         .iter()
-        .filter_map(|c| c.color.as_ref().map(|color| (c.id.as_str(), color.as_str())))
+        .filter_map(|c| {
+            c.color
+                .as_ref()
+                .map(|color| (c.id.as_str(), color.as_str()))
+        })
         .collect();
 
     // Build filter
@@ -637,12 +670,20 @@ fn cmd_timeline(
 
                 // Show location if present
                 if let Some(ref location) = fact.location {
-                    println!("    {} {}", "📍".dimmed(), format_location(location).dimmed());
+                    println!(
+                        "    {} {}",
+                        "📍".dimmed(),
+                        format_location(location).dimmed()
+                    );
                 }
 
                 // Show attachments if present
                 for attachment in &fact.attachments {
-                    println!("    {} {}", "📎".dimmed(), format_attachment(attachment).dimmed());
+                    println!(
+                        "    {} {}",
+                        "📎".dimmed(),
+                        format_attachment(attachment).dimmed()
+                    );
                 }
             }
             println!();
@@ -658,7 +699,10 @@ fn cmd_timeline(
                         fact.text.clone(),
                         fact.with.as_ref().map(|w| w.join(";")).unwrap_or_default(),
                         tf.shared_from.unwrap_or("").to_string(),
-                        fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        fact.location
+                            .as_ref()
+                            .map(format_location)
+                            .unwrap_or_default(),
                         fact.attachments
                             .iter()
                             .map(|a| a.url.clone())
@@ -668,7 +712,15 @@ fn cmd_timeline(
                 })
                 .collect();
             print_csv(
-                &["date", "category", "text", "with", "shared_from", "location", "attachments"],
+                &[
+                    "date",
+                    "category",
+                    "text",
+                    "with",
+                    "shared_from",
+                    "location",
+                    "attachments",
+                ],
                 &rows,
             );
         }
@@ -683,7 +735,10 @@ fn cmd_timeline(
                         category_label(&chronicle, &fact.category).to_string(),
                         fact.text.clone(),
                         fact.with.as_ref().map(|w| w.join(", ")).unwrap_or_default(),
-                        fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        fact.location
+                            .as_ref()
+                            .map(format_location)
+                            .unwrap_or_default(),
                         fact.attachments
                             .iter()
                             .map(format_attachment_markdown)
@@ -694,7 +749,15 @@ fn cmd_timeline(
                 })
                 .collect();
             print_md_table(
-                &["Date", "Category", "Event", "With", "Location", "Attachments", "Shared From"],
+                &[
+                    "Date",
+                    "Category",
+                    "Event",
+                    "With",
+                    "Location",
+                    "Attachments",
+                    "Shared From",
+                ],
                 &rows,
             );
         }
@@ -744,7 +807,11 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
             println!(
                 "Found {} {} for '{}':",
                 results.len(),
-                if results.len() == 1 { "result" } else { "results" },
+                if results.len() == 1 {
+                    "result"
+                } else {
+                    "results"
+                },
                 query
             );
             println!();
@@ -787,7 +854,11 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
                         r.fact.date.clone(),
                         category_label(&chronicle, &r.fact.category).to_string(),
                         r.fact.text.clone(),
-                        r.fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        r.fact
+                            .location
+                            .as_ref()
+                            .map(format_location)
+                            .unwrap_or_default(),
                         r.fact
                             .attachments
                             .iter()
@@ -798,7 +869,15 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
                 })
                 .collect();
             print_csv(
-                &["person_id", "person_name", "date", "category", "text", "location", "attachments"],
+                &[
+                    "person_id",
+                    "person_name",
+                    "date",
+                    "category",
+                    "text",
+                    "location",
+                    "attachments",
+                ],
                 &rows,
             );
         }
@@ -812,7 +891,11 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
                         r.fact.date.clone(),
                         category_label(&chronicle, &r.fact.category).to_string(),
                         r.fact.text.clone(),
-                        r.fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        r.fact
+                            .location
+                            .as_ref()
+                            .map(format_location)
+                            .unwrap_or_default(),
                         r.fact
                             .attachments
                             .iter()
@@ -823,7 +906,14 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
                 })
                 .collect();
             print_md_table(
-                &["Person", "Date", "Category", "Event", "Location", "Attachments"],
+                &[
+                    "Person",
+                    "Date",
+                    "Category",
+                    "Event",
+                    "Location",
+                    "Attachments",
+                ],
                 &rows,
             );
         }
@@ -864,8 +954,9 @@ fn cmd_validate(
     strict: bool,
 ) -> Result<()> {
     use kinsaga::{
-        apply_suggestions, count_facts_with_coordinates, count_facts_without_coordinates,
-        suggest_coordinates, validate_gps, GpsCheckOutcome, GpsSuggestOutcome, NominatimClient,
+        GpsCheckOutcome, GpsSuggestOutcome, NominatimClient, apply_suggestions,
+        count_facts_with_coordinates, count_facts_without_coordinates, suggest_coordinates,
+        validate_gps,
     };
 
     // Validate --in-place requires --correct or --apply
@@ -974,7 +1065,11 @@ fn cmd_validate(
                             format!(
                                 "Country mismatch: '{}' vs '{}'",
                                 result.stored_country,
-                                result.nominatim_result.country.as_deref().unwrap_or("unknown")
+                                result
+                                    .nominatim_result
+                                    .country
+                                    .as_deref()
+                                    .unwrap_or("unknown")
                             )
                             .yellow()
                         );
@@ -1025,7 +1120,10 @@ fn cmd_validate(
         // Handle --suggest flag: find locations without coordinates and suggest them
         if suggest {
             eprintln!();
-            eprintln!("{}", "Suggesting GPS coordinates for locations without them...".cyan());
+            eprintln!(
+                "{}",
+                "Suggesting GPS coordinates for locations without them...".cyan()
+            );
 
             let without_coords = count_facts_without_coordinates(&chronicle);
             if without_coords == 0 {
@@ -1051,7 +1149,11 @@ fn cmd_validate(
                                 let marker = if i == 0 { "★" } else { "○" };
                                 eprintln!(
                                     "    {} {:.6}, {:.6} - {}",
-                                    if i == 0 { marker.green() } else { marker.dimmed() },
+                                    if i == 0 {
+                                        marker.green()
+                                    } else {
+                                        marker.dimmed()
+                                    },
                                     place.lat,
                                     place.lon,
                                     place.display_name
@@ -1145,7 +1247,10 @@ fn cmd_validate(
             if modified {
                 save(file, &chronicle).context("Failed to save chronicle")?;
                 eprintln!();
-                eprintln!("{}", format!("✓ Saved changes to {}", file.display()).green());
+                eprintln!(
+                    "{}",
+                    format!("✓ Saved changes to {}", file.display()).green()
+                );
             } else {
                 eprintln!();
                 eprintln!("No changes to save.");
@@ -1239,10 +1344,8 @@ fn cmd_add_fact(
     let location_display = location.as_ref().map(format_location);
 
     // Format attachments for display
-    let attachments_display: Vec<String> = parsed_attachments
-        .iter()
-        .map(format_attachment)
-        .collect();
+    let attachments_display: Vec<String> =
+        parsed_attachments.iter().map(format_attachment).collect();
 
     if dry_run {
         eprintln!("{}", "Dry run - not saving changes".yellow());
@@ -1258,13 +1361,7 @@ fn cmd_add_fact(
     for (_, name, uuid) in &result.facts_added {
         eprintln!();
         eprintln!("  {}:", name.bold());
-        eprintln!(
-            "    {} {} [{}] {}",
-            "●".cyan(),
-            date,
-            category_label,
-            text
-        );
+        eprintln!("    {} {} [{}] {}", "●".cyan(), date, category_label, text);
         if let Some(ref loc_str) = location_display {
             eprintln!("    Location: {}", loc_str);
         }
@@ -1331,10 +1428,18 @@ fn cmd_edit_fact(
         // Handle coordinates
         if lat.is_some() || lon.is_some() {
             let lat_val = lat
-                .or_else(|| fact_location.and_then(|l| l.coordinates.as_ref()).map(|c| c.lat))
+                .or_else(|| {
+                    fact_location
+                        .and_then(|l| l.coordinates.as_ref())
+                        .map(|c| c.lat)
+                })
                 .ok_or_else(|| anyhow::anyhow!("--lat is required with --lon"))?;
             let lon_val = lon
-                .or_else(|| fact_location.and_then(|l| l.coordinates.as_ref()).map(|c| c.lon))
+                .or_else(|| {
+                    fact_location
+                        .and_then(|l| l.coordinates.as_ref())
+                        .map(|c| c.lon)
+                })
                 .ok_or_else(|| anyhow::anyhow!("--lon is required with --lat"))?;
             loc = loc.with_coordinates(Coordinates::new(lat_val, lon_val));
         } else if let Some(existing_coords) = fact_location.and_then(|l| l.coordinates.clone()) {
@@ -1380,7 +1485,9 @@ fn cmd_edit_fact(
         && options.location.is_none()
         && options.attachments.is_none()
     {
-        anyhow::bail!("No changes specified. Use --date, --category, --text, --with, --country, --place, --lat, --lon, --add-attach, --remove-attach, or clear flags.");
+        anyhow::bail!(
+            "No changes specified. Use --date, --category, --text, --with, --country, --place, --lat, --lon, --add-attach, --remove-attach, or clear flags."
+        );
     }
 
     let result = edit_fact(&mut chronicle, uuid, options)?;
@@ -1471,7 +1578,9 @@ fn cmd_merge(
     use kinsaga::{MergeEventType, MergeItemType};
 
     eprintln!("{}", "Categories:".bold());
-    let cat_events: Vec<_> = result.events.iter()
+    let cat_events: Vec<_> = result
+        .events
+        .iter()
         .filter(|e| matches!(e.item_type, MergeItemType::Category))
         .collect();
     if cat_events.is_empty() && result.stats.categories_identical == 0 {
@@ -1480,19 +1589,28 @@ fn cmd_merge(
         for event in cat_events {
             match event.event_type {
                 MergeEventType::Added => eprintln!("  {} {} (new)", "+".green(), event.id),
-                MergeEventType::Skipped => eprintln!("  {} {} (skipped: conflict)", "~".yellow(), event.id),
-                MergeEventType::Overwritten => eprintln!("  {} {} (overwritten)", "~".cyan(), event.id),
+                MergeEventType::Skipped => {
+                    eprintln!("  {} {} (skipped: conflict)", "~".yellow(), event.id)
+                }
+                MergeEventType::Overwritten => {
+                    eprintln!("  {} {} (overwritten)", "~".cyan(), event.id)
+                }
                 MergeEventType::Merged => {}
             }
         }
-        if result.stats.categories_added == 0 && result.stats.categories_skipped == 0 && result.stats.categories_overwritten == 0 {
+        if result.stats.categories_added == 0
+            && result.stats.categories_skipped == 0
+            && result.stats.categories_overwritten == 0
+        {
             eprintln!("  (no changes)");
         }
     }
     eprintln!();
 
     eprintln!("{}", "Persons:".bold());
-    let person_events: Vec<_> = result.events.iter()
+    let person_events: Vec<_> = result
+        .events
+        .iter()
         .filter(|e| matches!(e.item_type, MergeItemType::Person))
         .collect();
     if person_events.is_empty() {
@@ -1531,7 +1649,9 @@ fn cmd_merge(
     eprintln!("{}", "Summary:".bold());
     eprintln!(
         "  Categories: {} added, {} skipped, {} overwritten",
-        result.stats.categories_added, result.stats.categories_skipped, result.stats.categories_overwritten
+        result.stats.categories_added,
+        result.stats.categories_skipped,
+        result.stats.categories_overwritten
     );
     eprintln!(
         "  Persons: {} added, {} merged",
@@ -1548,7 +1668,10 @@ fn cmd_merge(
         eprintln!("{}", "Dry run - no changes saved".yellow());
     } else {
         save(target_file, &result.chronicle).context("Failed to save merged chronicle")?;
-        eprintln!("{}", format!("✓ Saved to {}", target_file.display()).green());
+        eprintln!(
+            "{}",
+            format!("✓ Saved to {}", target_file.display()).green()
+        );
     }
 
     Ok(())

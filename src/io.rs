@@ -45,14 +45,16 @@ pub fn save<P: AsRef<Path>>(path: P, chronicle: &Chronicle) -> Result<(), IoErro
         _ => Path::new("."),
     };
     let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(IoError::WriteError)?;
-    tmp.write_all(json.as_bytes()).map_err(IoError::WriteError)?;
+    tmp.write_all(json.as_bytes())
+        .map_err(IoError::WriteError)?;
     tmp.as_file().sync_all().map_err(IoError::WriteError)?;
     // Temp files are created with restrictive permissions; keep the
     // target's existing ones when overwriting
     if let Ok(meta) = fs::metadata(path) {
         let _ = tmp.as_file().set_permissions(meta.permissions());
     }
-    tmp.persist(path).map_err(|e| IoError::WriteError(e.error))?;
+    tmp.persist(path)
+        .map_err(|e| IoError::WriteError(e.error))?;
     Ok(())
 }
 
@@ -78,9 +80,7 @@ mod tests {
     fn sample_chronicle() -> Chronicle {
         let mut chronicle = Chronicle::new("1.0");
         chronicle.title = Some("Test".into());
-        chronicle
-            .categories
-            .push(Category::new("family", "Family"));
+        chronicle.categories.push(Category::new("family", "Family"));
         let mut person = Person::new("alice", "Alice Smith");
         person
             .facts

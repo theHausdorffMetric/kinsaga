@@ -183,7 +183,11 @@ mod tests {
         assert_eq!(result.references_stripped, 1);
         assert!(chronicle.find_person("bob").is_none());
         // The empty 'with' list is dropped entirely
-        assert!(chronicle.find_person("alice").unwrap().facts[0].with.is_none());
+        assert!(
+            chronicle.find_person("alice").unwrap().facts[0]
+                .with
+                .is_none()
+        );
     }
 
     #[test]

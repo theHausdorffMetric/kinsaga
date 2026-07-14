@@ -369,8 +369,14 @@ fn evaluate_location_match(location: &Location, place: &GeocodedPlace) -> (bool,
         .is_some_and(|c| fuzzy_match(c, &location.country));
 
     let place_matches = location.place.as_ref().map(|stored_place| {
-        place.city.as_ref().is_some_and(|c| fuzzy_match(c, stored_place))
-            || place.state.as_ref().is_some_and(|s| fuzzy_match(s, stored_place))
+        place
+            .city
+            .as_ref()
+            .is_some_and(|c| fuzzy_match(c, stored_place))
+            || place
+                .state
+                .as_ref()
+                .is_some_and(|s| fuzzy_match(s, stored_place))
             || fuzzy_match(&place.display_name, stored_place)
     });
 
@@ -513,7 +519,10 @@ pub fn apply_suggestions(chronicle: &mut Chronicle, suggestions: &[GpsSuggestion
 
 /// ISO 3166-1 alpha-2 country codes mapped to common names (including native names).
 const COUNTRY_CODES: &[(&str, &[&str])] = &[
-    ("ch", &["switzerland", "schweiz", "suisse", "svizzera", "svizra"]),
+    (
+        "ch",
+        &["switzerland", "schweiz", "suisse", "svizzera", "svizra"],
+    ),
     ("de", &["germany", "deutschland"]),
     ("at", &["austria", "österreich", "oesterreich"]),
     ("fr", &["france"]),
@@ -628,12 +637,7 @@ fn same_country(a: &str, b: &str) -> bool {
 /// Check if two strings match (case-insensitive, with some normalization).
 /// Also handles ISO 3166-1 alpha-2 country codes and country name variants.
 pub fn fuzzy_match(a: &str, b: &str) -> bool {
-    let normalize = |s: &str| {
-        s.to_lowercase()
-            .replace(['-', '_'], " ")
-            .trim()
-            .to_string()
-    };
+    let normalize = |s: &str| s.to_lowercase().replace(['-', '_'], " ").trim().to_string();
 
     let a_norm = normalize(a);
     let b_norm = normalize(b);
@@ -745,7 +749,10 @@ mod tests {
     fn test_invalid_coordinates() {
         let mut client = NominatimClient::new("test/1.0");
         let result = client.reverse_geocode(100.0, 0.0);
-        assert!(matches!(result, Err(GeocodeError::InvalidCoordinates { .. })));
+        assert!(matches!(
+            result,
+            Err(GeocodeError::InvalidCoordinates { .. })
+        ));
     }
 
     #[test]
@@ -757,7 +764,11 @@ mod tests {
         }"#;
         let place = parse_reverse_response(body).unwrap();
         assert_eq!(place.country.as_deref(), Some("Schweiz"));
-        assert_eq!(place.city.as_deref(), Some("Schwändi"), "village used as city fallback");
+        assert_eq!(
+            place.city.as_deref(),
+            Some("Schwändi"),
+            "village used as city fallback"
+        );
         assert_eq!(place.state.as_deref(), Some("Glarus"));
         assert!((place.lat - 46.960566).abs() < 1e-9);
     }
@@ -766,7 +777,10 @@ mod tests {
     fn test_parse_reverse_response_unable_to_geocode_is_no_results() {
         // Nominatim answers HTTP 200 with an error field for e.g. ocean coords
         let body = r#"{"error": "Unable to geocode"}"#;
-        assert!(matches!(parse_reverse_response(body), Err(GeocodeError::NoResults)));
+        assert!(matches!(
+            parse_reverse_response(body),
+            Err(GeocodeError::NoResults)
+        ));
     }
 
     #[test]
@@ -834,7 +848,11 @@ mod tests {
         let request = server.join().unwrap();
         assert!(request.starts_with("GET /reverse?lat=46.96&lon=9.09"));
         // Header names are lowercased on the wire
-        assert!(request.to_lowercase().contains("user-agent: kinsaga-test/1.0"));
+        assert!(
+            request
+                .to_lowercase()
+                .contains("user-agent: kinsaga-test/1.0")
+        );
     }
 
     fn geocoded(display: &str, country: Option<&str>, city: Option<&str>) -> GeocodedPlace {
@@ -854,7 +872,11 @@ mod tests {
 
         // Country and place both match
         let loc = Location::new("CH").with_place("Mettmenalp");
-        let place = geocoded("Mettmenalp, Glarus Süd, Schweiz", Some("Schweiz"), Some("Mettmenalp"));
+        let place = geocoded(
+            "Mettmenalp, Glarus Süd, Schweiz",
+            Some("Schweiz"),
+            Some("Mettmenalp"),
+        );
         assert_eq!(evaluate_location_match(&loc, &place), (true, Some(true)));
 
         // Wrong country
@@ -896,7 +918,9 @@ mod tests {
         let mut without_coords = Fact::new("uuid-2", "2021", "travel", "Trip B");
         without_coords.location = Some(Location::new("Japan").with_place("Tokyo"));
         alice.facts.push(without_coords);
-        alice.facts.push(Fact::new("uuid-3", "2022", "travel", "No location"));
+        alice
+            .facts
+            .push(Fact::new("uuid-3", "2022", "travel", "No location"));
         chronicle.persons.push(alice);
 
         assert_eq!(count_facts_with_coordinates(&chronicle), 1);

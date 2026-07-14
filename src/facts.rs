@@ -1,7 +1,7 @@
 //! Fact creation and manipulation operations.
 
 use crate::date::DateError;
-use crate::filter::{filter_facts, FactFilter};
+use crate::filter::{FactFilter, filter_facts};
 use crate::validate::is_valid_mime_type;
 use crate::{Attachment, Chronicle, ChronicleDate, Coordinates, Fact, Location};
 use std::collections::HashSet;
@@ -56,7 +56,9 @@ pub enum FactError {
     #[error("Country cannot be empty")]
     EmptyCountry,
 
-    #[error("Invalid GPS coordinates (lat: {lat}, lon: {lon}). Valid ranges: lat -90..90, lon -180..180")]
+    #[error(
+        "Invalid GPS coordinates (lat: {lat}, lon: {lon}). Valid ranges: lat -90..90, lon -180..180"
+    )]
     InvalidCoordinates { lat: f64, lon: f64 },
 
     #[error("Invalid MIME type '{mime}'. Expected format: type/subtype (e.g., image/jpeg)")]
@@ -645,12 +647,9 @@ mod tests {
         chronicle.categories.push(Category::new("travel", "Travel"));
 
         let mut alice = Person::new("alice", "Alice Smith");
-        alice.facts.push(Fact::new(
-            "uuid-1",
-            "2020-01-01",
-            "family",
-            "Test event",
-        ));
+        alice
+            .facts
+            .push(Fact::new("uuid-1", "2020-01-01", "family", "Test event"));
         chronicle.persons.push(alice);
 
         let bob = Person::new("bob", "Bob Johnson");
@@ -734,7 +733,12 @@ mod tests {
         assert_eq!(result.facts_added.len(), 2);
         assert_eq!(chronicle.find_person("bob").unwrap().facts.len(), 1);
         // alice's fact lists bob once
-        let alice_fact = chronicle.find_person("alice").unwrap().facts.last().unwrap();
+        let alice_fact = chronicle
+            .find_person("alice")
+            .unwrap()
+            .facts
+            .last()
+            .unwrap();
         assert_eq!(alice_fact.with, Some(vec!["bob".to_string()]));
     }
 
@@ -969,9 +973,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(chronicle.find_person("alice").unwrap().facts[0]
-            .location
-            .is_some());
+        assert!(
+            chronicle.find_person("alice").unwrap().facts[0]
+                .location
+                .is_some()
+        );
 
         // Then clear it
         edit_fact(

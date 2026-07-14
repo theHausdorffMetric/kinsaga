@@ -189,10 +189,12 @@ fn add_fact_roundtrip_with_quiet_stdout() {
 
     let chronicle = kinsaga::load(tmp.path()).unwrap();
     let alice = chronicle.find_person("alice").unwrap();
-    assert!(alice
-        .facts
-        .iter()
-        .any(|f| f.text == "Integration test event"));
+    assert!(
+        alice
+            .facts
+            .iter()
+            .any(|f| f.text == "Integration test event")
+    );
 }
 
 #[test]
@@ -203,7 +205,14 @@ fn add_fact_dry_run_does_not_modify_file() {
         .arg("-i")
         .arg(tmp.path())
         .args([
-            "add-fact", "alice", "-d", "2024-01-01", "-c", "family", "-t", "Preview",
+            "add-fact",
+            "alice",
+            "-d",
+            "2024-01-01",
+            "-c",
+            "family",
+            "-t",
+            "Preview",
             "--dry-run",
         ])
         .assert()
@@ -292,7 +301,10 @@ fn edit_fact_add_attachment_with_type_and_title() {
         .unwrap();
     assert_eq!(fact.attachments.len(), 1);
     assert_eq!(fact.attachments[0].url, "file:///photos/house.jpg");
-    assert_eq!(fact.attachments[0].content_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(
+        fact.attachments[0].content_type.as_deref(),
+        Some("image/jpeg")
+    );
     assert_eq!(fact.attachments[0].title.as_deref(), Some("New house"));
 }
 
@@ -387,11 +399,13 @@ fn remove_fact_roundtrip() {
         .success();
 
     let chronicle = kinsaga::load(tmp.path()).unwrap();
-    assert!(!chronicle
-        .persons
-        .iter()
-        .flat_map(|p| &p.facts)
-        .any(|f| f.id == uuid));
+    assert!(
+        !chronicle
+            .persons
+            .iter()
+            .flat_map(|p| &p.facts)
+            .any(|f| f.id == uuid)
+    );
 }
 
 #[test]
@@ -433,8 +447,7 @@ fn remove_person_requires_force_when_referenced() {
 fn schema_outputs_valid_json() {
     let output = kinsaga().arg("schema").output().unwrap();
     assert!(output.status.success());
-    serde_json::from_slice::<serde_json::Value>(&output.stdout)
-        .expect("schema must be valid JSON");
+    serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("schema must be valid JSON");
 }
 
 #[test]

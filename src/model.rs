@@ -292,20 +292,17 @@ mod tests {
     fn test_serialize_chronicle() {
         let mut chronicle = Chronicle::new("1.0");
         chronicle.title = Some("Test Chronicle".into());
-        chronicle.categories.push(
-            Category::new("family", "Family & Friends")
-                .with_color("#E57373")
-        );
+        chronicle
+            .categories
+            .push(Category::new("family", "Family & Friends").with_color("#E57373"));
 
         let mut person = Person::new("alice", "Alice Smith");
-        person.facts.push(
-            Fact::new(
-                "uuid-1",
-                "1990-05-15",
-                "family",
-                "Born in Springfield",
-            )
-        );
+        person.facts.push(Fact::new(
+            "uuid-1",
+            "1990-05-15",
+            "family",
+            "Born in Springfield",
+        ));
         chronicle.persons.push(person);
 
         let json = serde_json::to_string_pretty(&chronicle).unwrap();
@@ -467,7 +464,10 @@ mod tests {
 
         assert_eq!(fact.attachments.len(), 1);
         assert_eq!(fact.attachments[0].url, "https://example.com/photo.jpg");
-        assert_eq!(fact.attachments[0].content_type, Some("image/jpeg".to_string()));
+        assert_eq!(
+            fact.attachments[0].content_type,
+            Some("image/jpeg".to_string())
+        );
     }
 
     #[test]
