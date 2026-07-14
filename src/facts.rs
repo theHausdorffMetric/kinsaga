@@ -4,6 +4,7 @@ use crate::date::DateError;
 use crate::filter::{filter_facts, FactFilter};
 use crate::validate::is_valid_mime_type;
 use crate::{Attachment, Chronicle, ChronicleDate, Coordinates, Fact, Location};
+use std::collections::HashSet;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
@@ -64,6 +65,9 @@ pub enum FactError {
     #[error("Invalid URL '{url}'. URLs must include a scheme (e.g., file://, https://, s3://)")]
     InvalidUrl { url: String },
 
+    #[error("'with' cannot reference the fact's own person ('{id}')")]
+    WithSelfReference { id: String },
+
     #[error("Fact with UUID '{id}' not found")]
     FactNotFound { id: String },
 }
@@ -85,6 +89,8 @@ pub fn add_fact(
     person_id: &str,
     options: AddFactOptions,
 ) -> Result<AddFactResult, FactError> {
+    let mut options = options;
+
     // Validate person exists
     if chronicle.find_person(person_id).is_none() {
         return Err(FactError::PersonNotFound {
@@ -110,8 +116,15 @@ pub fn add_fact(
     }
 
     // Validate 'with' references
-    if let Some(ref with_ids) = options.with {
-        for with_id in with_ids {
+    if let Some(ref mut with_ids) = options.with {
+        // The fact's own person must not appear in 'with' (it would
+        // self-reference and double-propagate)
+        if with_ids.iter().any(|id| id == person_id) {
+            return Err(FactError::WithSelfReference {
+                id: person_id.to_string(),
+            });
+        }
+        for with_id in with_ids.iter() {
             if chronicle.find_person(with_id).is_none() {
                 return Err(FactError::WithPersonNotFound {
                     id: with_id.clone(),
@@ -119,6 +132,9 @@ pub fn add_fact(
                 });
             }
         }
+        // Silently drop duplicate entries, preserving order
+        let mut seen = HashSet::new();
+        with_ids.retain(|id| seen.insert(id.clone()));
     }
 
     // Validate location if present
@@ -474,6 +490,12 @@ pub fn edit_fact(
 
     // Validate 'with' references if provided
     if let Some(WithUpdate::Replace(ref with_ids)) = options.with {
+        let owner_id = &chronicle.persons[person_idx].id;
+        if with_ids.iter().any(|id| id == owner_id) {
+            return Err(FactError::WithSelfReference {
+                id: owner_id.clone(),
+            });
+        }
         for with_id in with_ids {
             if chronicle.find_person(with_id).is_none() {
                 return Err(FactError::WithPersonNotFound {
@@ -533,6 +555,12 @@ pub fn edit_fact(
 
     match options.with {
         Some(WithUpdate::Replace(with_ids)) => {
+            // Drop duplicate entries, preserving order
+            let mut seen = HashSet::new();
+            let with_ids: Vec<String> = with_ids
+                .into_iter()
+                .filter(|id| seen.insert(id.clone()))
+                .collect();
             fact.with = if with_ids.is_empty() {
                 None
             } else {
@@ -636,6 +664,67 @@ mod tests {
         assert_eq!(result.facts_added.len(), 2);
         assert_eq!(chronicle.find_person("alice").unwrap().facts.len(), 2);
         assert_eq!(chronicle.find_person("bob").unwrap().facts.len(), 1);
+    }
+
+    #[test]
+    fn test_add_fact_with_self_reference_rejected() {
+        let mut chronicle = create_test_chronicle();
+
+        let options = AddFactOptions {
+            date: "2021".to_string(),
+            category: "family".to_string(),
+            text: "Event".to_string(),
+            with: Some(vec!["alice".to_string()]),
+            ..Default::default()
+        };
+
+        let result = add_fact(&mut chronicle, "alice", options);
+        assert!(matches!(
+            result.unwrap_err(),
+            FactError::WithSelfReference { .. }
+        ));
+    }
+
+    #[test]
+    fn test_add_fact_with_duplicates_deduped() {
+        let mut chronicle = create_test_chronicle();
+
+        let options = AddFactOptions {
+            date: "2021".to_string(),
+            category: "family".to_string(),
+            text: "Shared event".to_string(),
+            with: Some(vec!["bob".to_string(), "bob".to_string()]),
+            propagate: true,
+            ..Default::default()
+        };
+
+        let result = add_fact(&mut chronicle, "alice", options).unwrap();
+
+        // bob receives exactly one propagated fact, not two
+        assert_eq!(result.facts_added.len(), 2);
+        assert_eq!(chronicle.find_person("bob").unwrap().facts.len(), 1);
+        // alice's fact lists bob once
+        let alice_fact = chronicle.find_person("alice").unwrap().facts.last().unwrap();
+        assert_eq!(alice_fact.with, Some(vec!["bob".to_string()]));
+    }
+
+    #[test]
+    fn test_edit_fact_with_self_reference_rejected() {
+        let mut chronicle = create_test_chronicle();
+
+        let result = edit_fact(
+            &mut chronicle,
+            "uuid-1",
+            EditFactOptions {
+                with: Some(WithUpdate::Replace(vec!["alice".to_string()])),
+                ..Default::default()
+            },
+        );
+
+        assert!(matches!(
+            result.unwrap_err(),
+            FactError::WithSelfReference { .. }
+        ));
     }
 
     #[test]
