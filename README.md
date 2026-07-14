@@ -58,6 +58,9 @@ kinsaga add-fact alice -d 2024-07-15 -c travel -t "Trip to Paris" --country Fran
 | `validate` | Validate structure, UUIDs, references, and GPS coordinates |
 | `add-fact <person>` | Add a new fact with date, category, text, location, attachments |
 | `edit-fact <uuid>` | Edit an existing fact by UUID |
+| `remove-fact <uuid>` | Remove a fact by UUID |
+| `add-person <id>` | Add a new person to the chronicle |
+| `remove-person <id>` | Remove a person and all their facts |
 | `merge <file>` | Merge another chronicle into this one |
 | `schema` | Print JSON Schema for chronicle files |
 

@@ -50,6 +50,9 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `kinsaga validate` | Validate chronicle structure, references, and UUIDs |
 | `kinsaga add-fact <person>` | Add a new fact to a person's timeline |
 | `kinsaga edit-fact <uuid>` | Edit an existing fact by UUID |
+| `kinsaga remove-fact <uuid>` | Remove a fact by UUID |
+| `kinsaga add-person <id>` | Add a new person (`--name <name>`) |
+| `kinsaga remove-person <id>` | Remove a person and all their facts (`--force` strips 'with' references) |
 | `kinsaga merge <source>` | Merge another chronicle JSON file into the main chronicle |
 | `kinsaga schema` | Print JSON Schema for chronicle files (no input file required) |
 
@@ -95,10 +98,15 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--lat <lat>` | edit-fact | Set/update GPS latitude |
 | `--lon <lon>` | edit-fact | Set/update GPS longitude |
 | `--clear-location` | edit-fact | Clear location entirely |
-| `--add-attach <url>` | edit-fact | Add attachment URL |
+| `--add-attach <url>` | edit-fact | Add attachment URL (conflicts with remove/clear flags) |
+| `--attach-type <mime>` | edit-fact | MIME type for added attachments (requires `--add-attach`) |
+| `--attach-title <title>` | edit-fact | Title for added attachments (requires `--add-attach`) |
 | `--remove-attach <url>` | edit-fact | Remove attachment by URL |
 | `--clear-attachments` | edit-fact | Clear all attachments |
 | `--dry-run` | edit-fact | Preview without saving |
+| `--name <name>` | add-person | Display name (required) |
+| `--force` | remove-person | Remove even if referenced in 'with' (references are stripped) |
+| `--dry-run` | add-person, remove-person, remove-fact | Preview without saving |
 
 #### Output Streams & Exit Codes
 
@@ -129,9 +137,11 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Empty country | Warning | Location has empty country field |
 | Invalid GPS coordinates | Warning | Coordinates outside valid range (lat: -90..90, lon: -180..180) |
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
+| Invalid attachment URL | Warning | Attachment URL doesn't parse (missing scheme etc.) |
+| Invalid ID pattern | Warning | Person/category ID doesn't match `^[a-z][a-z0-9_-]*$` |
 
 ### Tests
-- 114 unit tests + 16 CLI integration tests + 1 doc test (all passing)
+- 130 unit tests + 22 CLI integration tests + 1 doc test (all passing)
 - Test coverage across all library modules; integration tests cover exit
   codes, stream separation, and mutation roundtrips (`tests/cli.rs`)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)

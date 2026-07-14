@@ -1,6 +1,6 @@
 [package]
 name = "kinsaga"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Daniel Probst <daniel@probst.dev>"]
 description = "A family chronicle library and CLI for managing timestamped, categorized life events"

@@ -442,7 +442,18 @@ flag); person name conflicts also emit an Overwritten event under
 - `validate_chronicle`: add error-level `DuplicatePersonId` / `DuplicateCategoryId`.
 - Tests: malformed source with duplicated person id; person-name conflict event.
 
-### Phase 4 — CLI polish & model decisions
+### Phase 4 — CLI polish & model decisions ✅ DONE (2026-07-14) → v0.4.0
+
+Implemented: F9+F14 (`56f0e5e`), F15 (`f389970`), F20 (`bed23c6`),
+F19+F22+F23 (`b1f539c`), F24 (`af462e9`).
+Decisions taken: **F9 → Option A** (`Attachment.url: String`, URL format
+checked in `build_attachments` and as a validation warning; malformed URLs no
+longer block loading, saving never normalizes). **F20 → Option B** (hand-written
+schema stays; date parser now enforces ISO digit counts, person/category IDs
+checked against the schema pattern, schema's fact-ID pattern relaxed from v4 to
+any UUID to match the validator). F15: self-references rejected, duplicates
+silently deduped. F24: remove-person refuses when referenced unless --force,
+which strips the references.
 
 **Step 4.1 — `edit-fact` flag semantics (F14)**
 - Error on conflicting attachment flags (`--clear-attachments` + `--add-attach`, etc.)
