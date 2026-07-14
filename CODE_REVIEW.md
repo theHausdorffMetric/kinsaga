@@ -389,7 +389,15 @@ are fixed. Bonus: add-fact/edit-fact dry-run vs. saved print duplication removed
 - STATUS.md/README: new exit-code semantics, redirect examples now valid.
 - Bump to 0.3.0, tag.
 
-### Phase 3 — Architecture consolidation (library-first restoration)
+### Phase 3 — Architecture consolidation (library-first restoration) ✅ DONE (2026-07-14)
+
+Implemented: F17 (`0f10425`), F11 (`daa2c96`), F18+F29 (`29d087b`),
+F12+F13+F31 (`ae22f6a`), F10+F16+F30 (`5d8054f`).
+Decisions taken: unparseable dates sort last everywhere; year-range filters
+exclude facts with unparseable dates; FactFilter's regex is compiled in
+`with_regex_text()` which returns `Result` (replacing the `with_regex(bool)`
+flag); person name conflicts also emit an Overwritten event under
+`--on-conflict overwrite` (symmetric to the Skip case in F30).
 
 **Step 3.1 — Extract GPS logic into the library (F17)**
 - New library functions (in `geocode.rs` or a `gps` module):

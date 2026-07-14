@@ -121,6 +121,8 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Empty UUID | Warning | Fact has no ID |
 | Invalid UUID format | Warning | ID doesn't parse as UUID |
 | Duplicate UUID | Error | Same UUID used by multiple facts |
+| Duplicate person ID | Error | Same person ID used by multiple persons |
+| Duplicate category ID | Error | Same category ID defined multiple times |
 | Unknown category | Warning | Fact references undefined category |
 | Invalid date | Warning | Date doesn't match ISO 8601 format |
 | Unknown person ref | Warning | `with` field references unknown person |
@@ -129,7 +131,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 99 unit tests + 15 CLI integration tests + 1 doc test (all passing)
+- 114 unit tests + 16 CLI integration tests + 1 doc test (all passing)
 - Test coverage across all library modules; integration tests cover exit
   codes, stream separation, and mutation roundtrips (`tests/cli.rs`)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
