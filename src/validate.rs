@@ -194,32 +194,25 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
 }
 
 /// Generate new UUIDs for facts with empty, invalid, or duplicate UUIDs.
+///
+/// Facts are processed in document order. For duplicate UUIDs, the first
+/// occurrence keeps its original ID and only later occurrences are
+/// regenerated, so stable references to the original fact survive.
 pub fn correct_uuids(mut chronicle: Chronicle, corrections: &[(String, String)]) -> Chronicle {
-    let mut used_uuids: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
-    // First pass: collect all valid, unique UUIDs
-    for person in &chronicle.persons {
-        for fact in &person.facts {
-            let needs_fix = corrections
-                .iter()
-                .any(|(pid, fid)| pid == &person.id && fid == &fact.id);
-            if !needs_fix && Uuid::parse_str(&fact.id).is_ok() {
-                used_uuids.insert(fact.id.clone());
-            }
-        }
-    }
-
-    // Second pass: fix invalid UUIDs
     for person in &mut chronicle.persons {
         for fact in &mut person.facts {
-            let needs_fix = corrections
+            let flagged = corrections
                 .iter()
                 .any(|(pid, fid)| pid == &person.id && fid == &fact.id);
-            if needs_fix {
-                let new_uuid = Uuid::new_v4().to_string();
-                used_uuids.insert(new_uuid.clone());
-                fact.id = new_uuid;
+            // A flagged ID is kept only if it is a valid UUID seen here first
+            // (the first occurrence of a duplicate pair keeps its ID).
+            let keeps_id = Uuid::parse_str(&fact.id).is_ok() && !seen.contains(&fact.id);
+            if flagged && !keeps_id {
+                fact.id = Uuid::new_v4().to_string();
             }
+            seen.insert(fact.id.clone());
         }
     }
 
@@ -339,5 +332,64 @@ mod tests {
 
         assert_ne!(fixed.persons[0].facts[0].id, "invalid");
         assert!(Uuid::parse_str(&fixed.persons[0].facts[0].id).is_ok());
+    }
+
+    #[test]
+    fn test_correct_uuids_duplicate_keeps_first_occurrence() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+
+        let uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let mut person = Person::new("alice", "Alice");
+        person.facts.push(Fact::new(uuid, "2020-01-01", "family", "Event 1"));
+        person.facts.push(Fact::new(uuid, "2020-01-02", "family", "Event 2"));
+        chronicle.persons.push(person);
+
+        let result = validate_chronicle(&chronicle);
+        let fixed = correct_uuids(chronicle, &result.needs_correction);
+
+        let facts = &fixed.persons[0].facts;
+        assert_eq!(facts[0].id, uuid, "first occurrence keeps its UUID");
+        assert_ne!(facts[1].id, uuid, "duplicate gets a new UUID");
+        assert!(Uuid::parse_str(&facts[1].id).is_ok());
+    }
+
+    #[test]
+    fn test_correct_uuids_cross_person_duplicate() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+
+        let uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let mut alice = Person::new("alice", "Alice");
+        alice.facts.push(Fact::new(uuid, "2020-01-01", "family", "Alice event"));
+        chronicle.persons.push(alice);
+        let mut bob = Person::new("bob", "Bob");
+        bob.facts.push(Fact::new(uuid, "2020-01-02", "family", "Bob event"));
+        chronicle.persons.push(bob);
+
+        let result = validate_chronicle(&chronicle);
+        let fixed = correct_uuids(chronicle, &result.needs_correction);
+
+        assert_eq!(fixed.persons[0].facts[0].id, uuid, "Alice keeps her UUID");
+        assert_ne!(fixed.persons[1].facts[0].id, uuid, "Bob's duplicate is regenerated");
+    }
+
+    #[test]
+    fn test_correct_uuids_multiple_empty_ids() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+
+        let mut person = Person::new("alice", "Alice");
+        person.facts.push(Fact::new("", "2020-01-01", "family", "Event 1"));
+        person.facts.push(Fact::new("", "2020-01-02", "family", "Event 2"));
+        chronicle.persons.push(person);
+
+        let result = validate_chronicle(&chronicle);
+        let fixed = correct_uuids(chronicle, &result.needs_correction);
+
+        let facts = &fixed.persons[0].facts;
+        assert!(Uuid::parse_str(&facts[0].id).is_ok());
+        assert!(Uuid::parse_str(&facts[1].id).is_ok());
+        assert_ne!(facts[0].id, facts[1].id, "each fact gets a distinct UUID");
     }
 }
