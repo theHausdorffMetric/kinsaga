@@ -112,6 +112,10 @@ enum Commands {
         /// Apply suggested GPS coordinates and output JSON to stdout (requires --suggest)
         #[arg(long, requires = "suggest")]
         apply: bool,
+
+        /// Exit with an error if warnings are found (not just errors)
+        #[arg(long)]
+        strict: bool,
     },
 
     /// Add a new fact to a person's timeline
@@ -312,7 +316,7 @@ fn main() -> Result<()> {
             include_shared,
         } => cmd_timeline(&input, &person, &format, category, from, to, include_shared),
         Commands::Search { query, format, regex } => cmd_search(&input, &query, &format, regex),
-        Commands::Validate { correct, in_place, gps, suggest, apply } => cmd_validate(&input, correct, in_place, gps, suggest, apply),
+        Commands::Validate { correct, in_place, gps, suggest, apply, strict } => cmd_validate(&input, correct, in_place, gps, suggest, apply, strict),
         Commands::AddFact {
             person,
             date,
@@ -690,10 +694,8 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
     let filter = FactFilter::new().with_text(query).with_regex(use_regex);
     let results = search(&chronicle, &filter);
 
-    if results.is_empty() {
-        println!("No results found for '{}'", query);
-        return Ok(());
-    }
+    // No early return on empty results: csv/md/json must still emit their
+    // (empty) payload so piped output stays machine-parseable
 
     match format {
         OutputFormat::Text => {
@@ -828,7 +830,16 @@ struct SearchResultJson {
     fact: Fact,
 }
 
-fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, suggest: bool, apply: bool) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn cmd_validate(
+    file: &PathBuf,
+    correct: bool,
+    in_place: bool,
+    gps: bool,
+    suggest: bool,
+    apply: bool,
+    strict: bool,
+) -> Result<()> {
     use kinsaga::{fuzzy_match, Coordinates, NominatimClient};
 
     // Validate --in-place requires --correct or --apply
@@ -841,10 +852,9 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
     // Use library validation function
     let result = validate_chronicle(&chronicle);
 
-    // Print results
-    println!("{}", "✓ Valid UTF-8".green());
-    println!("{}", "✓ Valid JSON structure".green());
-    println!(
+    // The report goes to stderr; stdout is reserved for machine output
+    // (corrected/updated JSON), so redirecting always yields valid JSON
+    eprintln!(
         "{} {} persons, {} facts",
         "✓".green(),
         result.person_count,
@@ -852,55 +862,54 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
     );
 
     if result.is_valid() {
-        println!("{}", "✓ All references and UUIDs valid".green());
+        eprintln!("{}", "✓ All references and UUIDs valid".green());
     } else {
         if !result.errors.is_empty() {
-            println!();
-            println!("{}", "Errors:".red());
+            eprintln!();
+            eprintln!("{}", "Errors:".red());
             for issue in &result.errors {
-                println!("  {} {}", "✗".red(), issue.message);
+                eprintln!("  {} {}", "✗".red(), issue.message);
             }
         }
         if !result.warnings.is_empty() {
-            println!();
-            println!("{}", "Warnings:".yellow());
+            eprintln!();
+            eprintln!("{}", "Warnings:".yellow());
             for issue in &result.warnings {
                 // Show issue type indicator
                 let indicator = match issue.issue_type {
                     IssueType::DuplicateUuid => "✗".red(),
                     _ => "!".yellow(),
                 };
-                println!("  {} {}", indicator, issue.message);
+                eprintln!("  {} {}", indicator, issue.message);
             }
         }
     }
 
-    // Handle --correct flag
-    if correct && !result.needs_correction.is_empty() {
-        let corrected = correct_uuids(chronicle.clone(), &result.needs_correction);
-        if in_place {
-            save(file, &corrected).context("Failed to save corrected chronicle")?;
-            println!();
-            println!(
-                "{}",
-                format!("✓ Corrected {} UUID(s) and saved to file", result.needs_correction.len()).green()
-            );
+    // Tracks whether the in-memory chronicle diverged from the file
+    let mut modified = false;
+
+    // Handle --correct flag: corrections are applied to the working copy;
+    // emitting or saving happens exactly once at the end, so combining
+    // --correct with --gps --apply can never lose changes
+    if correct {
+        if result.needs_correction.is_empty() {
+            eprintln!();
+            eprintln!("{}", "No UUID corrections needed.".green());
         } else {
-            let json = serde_json::to_string_pretty(&corrected)
-                .context("Failed to serialize corrected chronicle")?;
-            println!();
-            println!("{}", "--- Corrected JSON ---".cyan());
-            println!("{}", json);
+            chronicle = correct_uuids(chronicle, &result.needs_correction);
+            modified = true;
+            eprintln!();
+            eprintln!(
+                "{}",
+                format!("✓ Corrected {} UUID(s)", result.needs_correction.len()).green()
+            );
         }
-    } else if correct && result.needs_correction.is_empty() {
-        println!();
-        println!("{}", "No UUID corrections needed.".green());
     }
 
     // Handle --gps flag
     if gps {
-        println!();
-        println!("{}", "Validating GPS coordinates...".cyan());
+        eprintln!();
+        eprintln!("{}", "Validating GPS coordinates...".cyan());
 
         let mut client = NominatimClient::new(concat!(
             "kinsaga/",
@@ -924,13 +933,13 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
             .collect();
 
         if facts_with_coords.is_empty() {
-            println!("  No facts with GPS coordinates found.");
+            eprintln!("  No facts with GPS coordinates found.");
         } else {
-            println!(
+            eprintln!(
                 "  Checking {} location(s) with coordinates (1 req/sec rate limit)...",
                 facts_with_coords.len()
             );
-            println!();
+            eprintln!();
 
             let mut checked = 0;
             let mut mismatches = 0;
@@ -957,23 +966,23 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
 
                         if is_mismatch {
                             mismatches += 1;
-                            println!(
+                            eprintln!(
                                 "  {} {} ({})",
                                 "⚠".yellow(),
                                 fact_id,
                                 person_name.dimmed()
                             );
-                            println!(
+                            eprintln!(
                                 "    Stored:    {}, {}",
                                 location.place.as_deref().unwrap_or("-"),
                                 location.country
                             );
-                            println!(
+                            eprintln!(
                                 "    GPS says:  {}",
                                 place.display_name
                             );
                             if !country_matches {
-                                println!(
+                                eprintln!(
                                     "    {}",
                                     format!(
                                         "Country mismatch: '{}' vs '{}'",
@@ -982,12 +991,12 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                                     ).yellow()
                                 );
                             }
-                            println!();
+                            eprintln!();
                         }
                     }
                     Err(e) => {
                         errors += 1;
-                        println!(
+                        eprintln!(
                             "  {} {} ({}): {}",
                             "✗".red(),
                             fact_id,
@@ -999,7 +1008,7 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
             }
 
             // Summary
-            println!(
+            eprintln!(
                 "GPS validation: {} checked, {} mismatch(es), {} error(s)",
                 checked,
                 if mismatches > 0 {
@@ -1017,8 +1026,8 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
 
         // Handle --suggest flag: find locations without coordinates and suggest them
         if suggest {
-            println!();
-            println!("{}", "Suggesting GPS coordinates for locations without them...".cyan());
+            eprintln!();
+            eprintln!("{}", "Suggesting GPS coordinates for locations without them...".cyan());
 
             // Collect facts with location but no coordinates (need owned data for apply)
             let facts_without_coords: Vec<_> = chronicle
@@ -1038,13 +1047,13 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                 .collect();
 
             if facts_without_coords.is_empty() {
-                println!("  No locations without GPS coordinates found.");
+                eprintln!("  No locations without GPS coordinates found.");
             } else {
-                println!(
+                eprintln!(
                     "  Looking up {} location(s) (1 req/sec rate limit)...",
                     facts_without_coords.len()
                 );
-                println!();
+                eprintln!();
 
                 let mut suggested = 0;
                 let mut no_results = 0;
@@ -1065,7 +1074,7 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                         Ok(results) => {
                             if results.is_empty() {
                                 no_results += 1;
-                                println!(
+                                eprintln!(
                                     "  {} {} ({}): no results for \"{}\"",
                                     "?".dimmed(),
                                     fact_id,
@@ -1081,20 +1090,20 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                                     coords_to_apply.push((fact_id.clone(), top.lat, top.lon));
                                 }
 
-                                println!(
+                                eprintln!(
                                     "  {} {} ({})",
                                     if apply { "✓".green() } else { "→".green() },
                                     fact_id,
                                     person_name.dimmed()
                                 );
-                                println!(
+                                eprintln!(
                                     "    Query: \"{}\"",
                                     query
                                 );
 
                                 for (i, place) in results.iter().enumerate() {
                                     let marker = if i == 0 { "★" } else { "○" };
-                                    println!(
+                                    eprintln!(
                                         "    {} {:.6}, {:.6} - {}",
                                         if i == 0 { marker.green() } else { marker.dimmed() },
                                         place.lat,
@@ -1102,12 +1111,12 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                                         place.display_name
                                     );
                                 }
-                                println!();
+                                eprintln!();
                             }
                         }
                         Err(kinsaga::GeocodeError::NoResults) => {
                             no_results += 1;
-                            println!(
+                            eprintln!(
                                 "  {} {} ({}): no results for \"{}\"",
                                 "?".dimmed(),
                                 fact_id,
@@ -1117,7 +1126,7 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                         }
                         Err(e) => {
                             errors += 1;
-                            println!(
+                            eprintln!(
                                 "  {} {} ({}): {}",
                                 "✗".red(),
                                 fact_id,
@@ -1129,8 +1138,8 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                 }
 
                 // Summary
-                println!();
-                println!(
+                eprintln!();
+                eprintln!(
                     "GPS suggestions: {} found, {} no results, {} error(s)",
                     if suggested > 0 {
                         suggested.to_string().green().to_string()
@@ -1161,26 +1170,54 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
                             }
                         }
                     }
-
-                    if in_place {
-                        // Save the updated chronicle to file
-                        save(file, &chronicle).context("Failed to save chronicle")?;
-                        println!();
-                        println!(
-                            "{}",
-                            format!("✓ Applied {} coordinate(s) and saved to file", applied).green()
-                        );
-                    } else {
-                        // Output JSON to stdout
-                        let json = serde_json::to_string_pretty(&chronicle)
-                            .context("Failed to serialize chronicle")?;
-                        println!();
-                        println!("{}", "--- Updated JSON ---".cyan());
-                        println!("{}", json);
+                    if applied > 0 {
+                        modified = true;
                     }
+                    eprintln!();
+                    eprintln!("{}", format!("✓ Applied {} coordinate(s)", applied).green());
                 }
             }
         }
+    }
+
+    // Emit or save the (possibly modified) chronicle exactly once
+    if correct || apply {
+        if in_place {
+            if modified {
+                save(file, &chronicle).context("Failed to save chronicle")?;
+                eprintln!();
+                eprintln!("{}", format!("✓ Saved changes to {}", file.display()).green());
+            } else {
+                eprintln!();
+                eprintln!("No changes to save.");
+            }
+        } else {
+            // Always emit the full JSON so `validate --correct > out.json`
+            // yields a complete, valid file even when nothing needed fixing
+            let json = serde_json::to_string_pretty(&chronicle)
+                .context("Failed to serialize chronicle")?;
+            println!("{}", json);
+        }
+    }
+
+    // Exit code: errors fail validation; corrections that were applied
+    // count as resolved. With --strict, warnings fail too.
+    let final_result = if modified {
+        validate_chronicle(&chronicle)
+    } else {
+        result
+    };
+    if !final_result.errors.is_empty() {
+        anyhow::bail!(
+            "validation failed: {} error(s) found",
+            final_result.errors.len()
+        );
+    }
+    if strict && !final_result.warnings.is_empty() {
+        anyhow::bail!(
+            "validation failed (--strict): {} warning(s) found",
+            final_result.warnings.len()
+        );
     }
 
     Ok(())
@@ -1222,7 +1259,7 @@ fn cmd_add_fact(
 
     // Warn if --propagate is used without --with
     if propagate && with.is_none() {
-        println!(
+        eprintln!(
             "{}",
             "Warning: --propagate has no effect without --with".yellow()
         );
@@ -1252,51 +1289,33 @@ fn cmd_add_fact(
         .collect();
 
     if dry_run {
-        println!("{}", "Dry run - not saving changes".yellow());
-        println!();
-        println!("Would add {} fact(s):", result.facts_added.len());
-        for (_, name, uuid) in &result.facts_added {
-            println!();
-            println!("  {}:", name.bold());
-            println!(
-                "    {} {} [{}] {}",
-                "●".cyan(),
-                date,
-                category_label,
-                text
-            );
-            if let Some(ref loc_str) = location_display {
-                println!("    Location: {}", loc_str);
-            }
-            for att_str in &attachments_display {
-                println!("    Attachment: {}", att_str);
-            }
-            println!("    UUID: {}", uuid);
-        }
+        eprintln!("{}", "Dry run - not saving changes".yellow());
+        eprintln!();
+        eprintln!("Would add {} fact(s):", result.facts_added.len());
     } else {
         save(file, &chronicle).context("Failed to save chronicle")?;
-        println!(
+        eprintln!(
             "{}",
             format!("{} fact(s) added successfully", result.facts_added.len()).green()
         );
-        for (_, name, uuid) in &result.facts_added {
-            println!();
-            println!("  {}:", name.bold());
-            println!(
-                "    {} {} [{}] {}",
-                "●".cyan(),
-                date,
-                category_label,
-                text
-            );
-            if let Some(ref loc_str) = location_display {
-                println!("    Location: {}", loc_str);
-            }
-            for att_str in &attachments_display {
-                println!("    Attachment: {}", att_str);
-            }
-            println!("    UUID: {}", uuid);
+    }
+    for (_, name, uuid) in &result.facts_added {
+        eprintln!();
+        eprintln!("  {}:", name.bold());
+        eprintln!(
+            "    {} {} [{}] {}",
+            "●".cyan(),
+            date,
+            category_label,
+            text
+        );
+        if let Some(ref loc_str) = location_display {
+            eprintln!("    Location: {}", loc_str);
         }
+        for att_str in &attachments_display {
+            eprintln!("    Attachment: {}", att_str);
+        }
+        eprintln!("    UUID: {}", uuid);
     }
 
     Ok(())
@@ -1431,49 +1450,32 @@ fn cmd_edit_fact(
         .unwrap_or_else(|| updated_fact.category.clone());
 
     if dry_run {
-        println!("{}", "Dry run - not saving changes".yellow());
-        println!();
-        println!("Would update fact for {}:", result.person_name.bold());
-        println!(
-            "  {} {} [{}] {}",
-            "●".cyan(),
-            updated_fact.date,
-            category_label,
-            updated_fact.text
-        );
-        if let Some(ref loc) = updated_fact.location {
-            println!("  Location: {}", format_location(loc));
-        }
-        for att in &updated_fact.attachments {
-            println!("  Attachment: {}", format_attachment(att));
-        }
-        if let Some(ref with_ids) = updated_fact.with {
-            println!("  With: {}", with_ids.join(", "));
-        }
-        println!("  UUID: {}", uuid);
+        eprintln!("{}", "Dry run - not saving changes".yellow());
+        eprintln!();
+        eprintln!("Would update fact for {}:", result.person_name.bold());
     } else {
         save(file, &chronicle).context("Failed to save chronicle")?;
-        println!("{}", "Fact updated successfully".green());
-        println!();
-        println!("{}:", result.person_name.bold());
-        println!(
-            "  {} {} [{}] {}",
-            "●".cyan(),
-            updated_fact.date,
-            category_label,
-            updated_fact.text
-        );
-        if let Some(ref loc) = updated_fact.location {
-            println!("  Location: {}", format_location(loc));
-        }
-        for att in &updated_fact.attachments {
-            println!("  Attachment: {}", format_attachment(att));
-        }
-        if let Some(ref with_ids) = updated_fact.with {
-            println!("  With: {}", with_ids.join(", "));
-        }
-        println!("  UUID: {}", uuid);
+        eprintln!("{}", "Fact updated successfully".green());
+        eprintln!();
+        eprintln!("{}:", result.person_name.bold());
     }
+    eprintln!(
+        "  {} {} [{}] {}",
+        "●".cyan(),
+        updated_fact.date,
+        category_label,
+        updated_fact.text
+    );
+    if let Some(ref loc) = updated_fact.location {
+        eprintln!("  Location: {}", format_location(loc));
+    }
+    for att in &updated_fact.attachments {
+        eprintln!("  Attachment: {}", format_attachment(att));
+    }
+    if let Some(ref with_ids) = updated_fact.with {
+        eprintln!("  With: {}", with_ids.join(", "));
+    }
+    eprintln!("  UUID: {}", uuid);
 
     Ok(())
 }
@@ -1506,12 +1508,12 @@ fn cmd_merge(
         regenerate_uuids,
     };
 
-    println!(
+    eprintln!(
         "Merging {} into {}...",
         source_file.display(),
         target_file.display()
     );
-    println!();
+    eprintln!();
 
     // Use library merge function
     let result = merge_chronicles(target, &source, &options)
@@ -1520,81 +1522,81 @@ fn cmd_merge(
     // Display events
     use kinsaga::{MergeEventType, MergeItemType};
 
-    println!("{}", "Categories:".bold());
+    eprintln!("{}", "Categories:".bold());
     let cat_events: Vec<_> = result.events.iter()
         .filter(|e| matches!(e.item_type, MergeItemType::Category))
         .collect();
     if cat_events.is_empty() && result.stats.categories_identical == 0 {
-        println!("  (no changes)");
+        eprintln!("  (no changes)");
     } else {
         for event in cat_events {
             match event.event_type {
-                MergeEventType::Added => println!("  {} {} (new)", "+".green(), event.id),
-                MergeEventType::Skipped => println!("  {} {} (skipped: conflict)", "~".yellow(), event.id),
-                MergeEventType::Overwritten => println!("  {} {} (overwritten)", "~".cyan(), event.id),
+                MergeEventType::Added => eprintln!("  {} {} (new)", "+".green(), event.id),
+                MergeEventType::Skipped => eprintln!("  {} {} (skipped: conflict)", "~".yellow(), event.id),
+                MergeEventType::Overwritten => eprintln!("  {} {} (overwritten)", "~".cyan(), event.id),
                 MergeEventType::Merged => {}
             }
         }
         if result.stats.categories_added == 0 && result.stats.categories_skipped == 0 && result.stats.categories_overwritten == 0 {
-            println!("  (no changes)");
+            eprintln!("  (no changes)");
         }
     }
-    println!();
+    eprintln!();
 
-    println!("{}", "Persons:".bold());
+    eprintln!("{}", "Persons:".bold());
     let person_events: Vec<_> = result.events.iter()
         .filter(|e| matches!(e.item_type, MergeItemType::Person))
         .collect();
     if person_events.is_empty() {
-        println!("  (no changes)");
+        eprintln!("  (no changes)");
     } else {
         for event in person_events {
             match event.event_type {
                 MergeEventType::Added => {
                     let details = event.details.as_deref().unwrap_or("");
-                    println!("  {} {} (new, {})", "+".green(), event.id, details);
+                    eprintln!("  {} {} (new, {})", "+".green(), event.id, details);
                 }
                 MergeEventType::Merged => {
                     let details = event.details.as_deref().unwrap_or("");
-                    println!("  {} {} (merged: {})", "~".cyan(), event.id, details);
+                    eprintln!("  {} {} (merged: {})", "~".cyan(), event.id, details);
                 }
                 _ => {}
             }
         }
     }
-    println!();
+    eprintln!();
 
     // Display warnings
     if !result.warnings.is_empty() {
-        println!("{}", "Warnings:".yellow());
+        eprintln!("{}", "Warnings:".yellow());
         for warning in &result.warnings {
-            println!("  {} {}", "!".yellow(), warning);
+            eprintln!("  {} {}", "!".yellow(), warning);
         }
-        println!();
+        eprintln!();
     }
 
     // Summary
-    println!("{}", "Summary:".bold());
-    println!(
+    eprintln!("{}", "Summary:".bold());
+    eprintln!(
         "  Categories: {} added, {} skipped, {} overwritten",
         result.stats.categories_added, result.stats.categories_skipped, result.stats.categories_overwritten
     );
-    println!(
+    eprintln!(
         "  Persons: {} added, {} merged",
         result.stats.persons_added, result.stats.persons_merged
     );
-    println!(
+    eprintln!(
         "  Facts: {} added, {} skipped (duplicates)",
         result.stats.facts_added, result.stats.facts_skipped
     );
-    println!();
+    eprintln!();
 
     // Save
     if dry_run {
-        println!("{}", "Dry run - no changes saved".yellow());
+        eprintln!("{}", "Dry run - no changes saved".yellow());
     } else {
         save(target_file, &result.chronicle).context("Failed to save merged chronicle")?;
-        println!("{}", format!("✓ Saved to {}", target_file.display()).green());
+        eprintln!("{}", format!("✓ Saved to {}", target_file.display()).green());
     }
 
     Ok(())
