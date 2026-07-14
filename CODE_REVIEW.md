@@ -310,9 +310,13 @@ Each step lists scope, files, and acceptance criteria. Steps within a phase are
 ordered; phases are sequential releases. Run `cargo test && cargo clippy --all-targets`
 after every step.
 
-### Phase 1 — Correctness hotfixes → release v0.2.1
+### Phase 1 — Correctness hotfixes → release v0.2.1 ✅ DONE (2026-07-14)
 
 Small, isolated, high-impact. No API changes.
+Implemented: F1 (`5a03a18`), F2 (`681ef08`), F7 (`6d773fa`), F8 (`bd892b6`).
+Note on 1.2: implemented with word-boundary matching (`contains_word`) instead of
+a minimum-length threshold — strictly stronger; also fixes the same flaw inside
+`matches_country_code`/`same_country` (e.g. "Ukraine" vs "uk").
 
 **Step 1.1 — Fix `truncate_text` (F1, part of F19)**
 - Rewrite `format::truncate_text` to cut on `char_indices()` boundaries.

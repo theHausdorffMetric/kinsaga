@@ -902,7 +902,11 @@ fn cmd_validate(file: &PathBuf, correct: bool, in_place: bool, gps: bool, sugges
         println!();
         println!("{}", "Validating GPS coordinates...".cyan());
 
-        let mut client = NominatimClient::new("kinsaga/0.2.0 (https://git.sr.ht/~danprobst/kinsaga)");
+        let mut client = NominatimClient::new(concat!(
+            "kinsaga/",
+            env!("CARGO_PKG_VERSION"),
+            " (https://git.sr.ht/~danprobst/kinsaga)"
+        ));
 
         // Collect facts with coordinates
         let facts_with_coords: Vec<_> = chronicle
