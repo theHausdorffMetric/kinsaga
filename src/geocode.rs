@@ -15,6 +15,9 @@ pub enum GeocodeError {
     #[error("Failed to parse response: {0}")]
     ParseError(String),
 
+    #[error("Nominatim error: {0}")]
+    Nominatim(String),
+
     #[error("No results found")]
     NoResults,
 
@@ -40,11 +43,16 @@ pub struct GeocodedPlace {
 }
 
 /// Raw response from Nominatim reverse geocoding.
+///
+/// Nominatim reports unknown areas (e.g. open ocean) as
+/// `{"error": "Unable to geocode"}` with HTTP 200, so all fields are
+/// optional and an `error` field is captured.
 #[derive(Debug, Deserialize)]
 struct NominatimReverseResponse {
-    display_name: String,
-    lat: String,
-    lon: String,
+    error: Option<String>,
+    display_name: Option<String>,
+    lat: Option<String>,
+    lon: Option<String>,
     address: Option<NominatimAddress>,
 }
 
@@ -67,9 +75,14 @@ struct NominatimSearchResult {
     address: Option<NominatimAddress>,
 }
 
+/// Default Nominatim instance.
+const DEFAULT_BASE_URL: &str = "https://nominatim.openstreetmap.org";
+
 /// Client for Nominatim geocoding API.
 pub struct NominatimClient {
+    agent: ureq::Agent,
     user_agent: String,
+    base_url: String,
     last_request: Option<Instant>,
     min_interval: Duration,
 }
@@ -78,12 +91,27 @@ impl NominatimClient {
     /// Create a new Nominatim client.
     ///
     /// The user_agent should identify your application per Nominatim's usage policy.
+    /// Requests time out (10 s connect, 30 s total) so a stalled connection
+    /// cannot hang the caller.
     pub fn new(user_agent: impl Into<String>) -> Self {
+        let agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build()
+            .new_agent();
         Self {
+            agent,
             user_agent: user_agent.into(),
+            base_url: DEFAULT_BASE_URL.to_string(),
             last_request: None,
             min_interval: Duration::from_millis(1100), // Slightly over 1 second to be safe
         }
+    }
+
+    /// Use a different Nominatim instance (e.g. self-hosted, or a mock in tests).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into().trim_end_matches('/').to_string();
+        self
     }
 
     /// Wait if necessary to respect rate limits.
@@ -97,6 +125,21 @@ impl NominatimClient {
         self.last_request = Some(Instant::now());
     }
 
+    /// Perform a GET request and return the response body.
+    fn get(&mut self, url: &str) -> Result<String, GeocodeError> {
+        self.rate_limit();
+        let response = self
+            .agent
+            .get(url)
+            .header("User-Agent", &self.user_agent)
+            .call()
+            .map_err(|e| GeocodeError::HttpError(e.to_string()))?;
+        response
+            .into_body()
+            .read_to_string()
+            .map_err(|e| GeocodeError::ParseError(e.to_string()))
+    }
+
     /// Reverse geocode coordinates to get place information.
     pub fn reverse_geocode(&mut self, lat: f64, lon: f64) -> Result<GeocodedPlace, GeocodeError> {
         // Validate coordinates
@@ -104,51 +147,12 @@ impl NominatimClient {
             return Err(GeocodeError::InvalidCoordinates { lat, lon });
         }
 
-        self.rate_limit();
-
         let url = format!(
-            "https://nominatim.openstreetmap.org/reverse?lat={}&lon={}&format=json&addressdetails=1",
-            lat, lon
+            "{}/reverse?lat={}&lon={}&format=json&addressdetails=1",
+            self.base_url, lat, lon
         );
-
-        let response = ureq::get(&url)
-            .header("User-Agent", &self.user_agent)
-            .call()
-            .map_err(|e| GeocodeError::HttpError(e.to_string()))?;
-
-        let body = response
-            .into_body()
-            .read_to_string()
-            .map_err(|e| GeocodeError::ParseError(e.to_string()))?;
-
-        let parsed: NominatimReverseResponse =
-            serde_json::from_str(&body).map_err(|e| GeocodeError::ParseError(e.to_string()))?;
-
-        let lat_parsed: f64 = parsed
-            .lat
-            .parse()
-            .map_err(|_| GeocodeError::ParseError("Invalid latitude in response".to_string()))?;
-        let lon_parsed: f64 = parsed
-            .lon
-            .parse()
-            .map_err(|_| GeocodeError::ParseError("Invalid longitude in response".to_string()))?;
-
-        // Extract city from various possible fields
-        let city = parsed.address.as_ref().and_then(|a| {
-            a.city
-                .clone()
-                .or_else(|| a.town.clone())
-                .or_else(|| a.village.clone())
-        });
-
-        Ok(GeocodedPlace {
-            display_name: parsed.display_name,
-            country: parsed.address.as_ref().and_then(|a| a.country.clone()),
-            city,
-            state: parsed.address.as_ref().and_then(|a| a.state.clone()),
-            lat: lat_parsed,
-            lon: lon_parsed,
-        })
+        let body = self.get(&url)?;
+        parse_reverse_response(&body)
     }
 
     /// Forward geocode a place name to get coordinates.
@@ -159,57 +163,111 @@ impl NominatimClient {
         query: &str,
         limit: usize,
     ) -> Result<Vec<GeocodedPlace>, GeocodeError> {
-        self.rate_limit();
-
-        let encoded_query = urlencoding::encode(query);
         let url = format!(
-            "https://nominatim.openstreetmap.org/search?q={}&format=json&addressdetails=1&limit={}",
-            encoded_query, limit
+            "{}/search?q={}&format=json&addressdetails=1&limit={}",
+            self.base_url,
+            urlencoding::encode(query),
+            limit
         );
-
-        let response = ureq::get(&url)
-            .header("User-Agent", &self.user_agent)
-            .call()
-            .map_err(|e| GeocodeError::HttpError(e.to_string()))?;
-
-        let body = response
-            .into_body()
-            .read_to_string()
-            .map_err(|e| GeocodeError::ParseError(e.to_string()))?;
-
-        let results: Vec<NominatimSearchResult> =
-            serde_json::from_str(&body).map_err(|e| GeocodeError::ParseError(e.to_string()))?;
-
-        if results.is_empty() {
+        let body = self.get(&url)?;
+        let places = parse_search_response(&body)?;
+        if places.is_empty() {
             return Err(GeocodeError::NoResults);
         }
-
-        let places = results
-            .into_iter()
-            .filter_map(|r| {
-                let lat: f64 = r.lat.parse().ok()?;
-                let lon: f64 = r.lon.parse().ok()?;
-
-                let city = r.address.as_ref().and_then(|a| {
-                    a.city
-                        .clone()
-                        .or_else(|| a.town.clone())
-                        .or_else(|| a.village.clone())
-                });
-
-                Some(GeocodedPlace {
-                    display_name: r.display_name,
-                    country: r.address.as_ref().and_then(|a| a.country.clone()),
-                    city,
-                    state: r.address.as_ref().and_then(|a| a.state.clone()),
-                    lat,
-                    lon,
-                })
-            })
-            .collect();
-
         Ok(places)
     }
+}
+
+/// Extract the city from the address fields Nominatim may use.
+fn extract_city(address: Option<&NominatimAddress>) -> Option<String> {
+    address.and_then(|a| {
+        a.city
+            .clone()
+            .or_else(|| a.town.clone())
+            .or_else(|| a.village.clone())
+    })
+}
+
+/// Parse a Nominatim reverse-geocoding response body.
+fn parse_reverse_response(body: &str) -> Result<GeocodedPlace, GeocodeError> {
+    let parsed: NominatimReverseResponse =
+        serde_json::from_str(body).map_err(|e| GeocodeError::ParseError(e.to_string()))?;
+
+    if let Some(error) = parsed.error {
+        // "Unable to geocode" means the coordinates hit no known area
+        // (e.g. open ocean); other messages are genuine service errors
+        return if error == "Unable to geocode" {
+            Err(GeocodeError::NoResults)
+        } else {
+            Err(GeocodeError::Nominatim(error))
+        };
+    }
+
+    let display_name = parsed
+        .display_name
+        .ok_or_else(|| GeocodeError::ParseError("missing display_name in response".to_string()))?;
+    let lat: f64 = parsed
+        .lat
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| GeocodeError::ParseError("invalid latitude in response".to_string()))?;
+    let lon: f64 = parsed
+        .lon
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| GeocodeError::ParseError("invalid longitude in response".to_string()))?;
+
+    Ok(GeocodedPlace {
+        city: extract_city(parsed.address.as_ref()),
+        country: parsed.address.as_ref().and_then(|a| a.country.clone()),
+        state: parsed.address.as_ref().and_then(|a| a.state.clone()),
+        display_name,
+        lat,
+        lon,
+    })
+}
+
+/// Parse a Nominatim search (forward-geocoding) response body.
+fn parse_search_response(body: &str) -> Result<Vec<GeocodedPlace>, GeocodeError> {
+    let results: Vec<NominatimSearchResult> = match serde_json::from_str(body) {
+        Ok(results) => results,
+        Err(parse_err) => {
+            // Errors come back as a JSON object instead of an array,
+            // either {"error": "..."} or {"error": {"code": .., "message": ".."}}
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+                && let Some(error) = value.get("error")
+            {
+                let message = error
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| {
+                        error
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .map(String::from)
+                    })
+                    .unwrap_or_else(|| error.to_string());
+                return Err(GeocodeError::Nominatim(message));
+            }
+            return Err(GeocodeError::ParseError(parse_err.to_string()));
+        }
+    };
+
+    Ok(results
+        .into_iter()
+        .filter_map(|r| {
+            let lat: f64 = r.lat.parse().ok()?;
+            let lon: f64 = r.lon.parse().ok()?;
+            Some(GeocodedPlace {
+                city: extract_city(r.address.as_ref()),
+                country: r.address.as_ref().and_then(|a| a.country.clone()),
+                state: r.address.as_ref().and_then(|a| a.state.clone()),
+                display_name: r.display_name,
+                lat,
+                lon,
+            })
+        })
+        .collect())
 }
 
 /// Result of validating a location's GPS coordinates.
@@ -688,6 +746,95 @@ mod tests {
         let mut client = NominatimClient::new("test/1.0");
         let result = client.reverse_geocode(100.0, 0.0);
         assert!(matches!(result, Err(GeocodeError::InvalidCoordinates { .. })));
+    }
+
+    #[test]
+    fn test_parse_reverse_response_success() {
+        let body = r#"{
+            "display_name": "Mettmenalp, Schwändi, Glarus, Schweiz",
+            "lat": "46.960566", "lon": "9.099201",
+            "address": {"country": "Schweiz", "village": "Schwändi", "state": "Glarus"}
+        }"#;
+        let place = parse_reverse_response(body).unwrap();
+        assert_eq!(place.country.as_deref(), Some("Schweiz"));
+        assert_eq!(place.city.as_deref(), Some("Schwändi"), "village used as city fallback");
+        assert_eq!(place.state.as_deref(), Some("Glarus"));
+        assert!((place.lat - 46.960566).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_parse_reverse_response_unable_to_geocode_is_no_results() {
+        // Nominatim answers HTTP 200 with an error field for e.g. ocean coords
+        let body = r#"{"error": "Unable to geocode"}"#;
+        assert!(matches!(parse_reverse_response(body), Err(GeocodeError::NoResults)));
+    }
+
+    #[test]
+    fn test_parse_reverse_response_other_error() {
+        let body = r#"{"error": "Rate limited"}"#;
+        assert!(matches!(
+            parse_reverse_response(body),
+            Err(GeocodeError::Nominatim(msg)) if msg == "Rate limited"
+        ));
+    }
+
+    #[test]
+    fn test_parse_search_response_success_and_error_envelope() {
+        let body = r#"[{
+            "display_name": "Paris, France",
+            "lat": "48.8566", "lon": "2.3522",
+            "address": {"country": "France", "city": "Paris"}
+        }]"#;
+        let places = parse_search_response(body).unwrap();
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].city.as_deref(), Some("Paris"));
+
+        // Error object instead of the expected array
+        let err_obj = r#"{"error": {"code": 400, "message": "Parameter 'q' missing"}}"#;
+        assert!(matches!(
+            parse_search_response(err_obj),
+            Err(GeocodeError::Nominatim(msg)) if msg.contains("missing")
+        ));
+
+        let err_str = r#"{"error": "boom"}"#;
+        assert!(matches!(
+            parse_search_response(err_str),
+            Err(GeocodeError::Nominatim(msg)) if msg == "boom"
+        ));
+    }
+
+    #[test]
+    fn test_reverse_geocode_against_mock_server() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = r#"{"display_name":"Mettmenalp, Glarus, Schweiz","lat":"46.96","lon":"9.09","address":{"country":"Schweiz","village":"Schwändi","state":"Glarus"}}"#;
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            request
+        });
+
+        let mut client =
+            NominatimClient::new("kinsaga-test/1.0").with_base_url(format!("http://{}", addr));
+        let place = client.reverse_geocode(46.96, 9.09).unwrap();
+        assert_eq!(place.country.as_deref(), Some("Schweiz"));
+        assert_eq!(place.city.as_deref(), Some("Schwändi"));
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /reverse?lat=46.96&lon=9.09"));
+        // Header names are lowercased on the wire
+        assert!(request.to_lowercase().contains("user-agent: kinsaga-test/1.0"));
     }
 
     fn geocoded(display: &str, country: Option<&str>, city: Option<&str>) -> GeocodedPlace {
