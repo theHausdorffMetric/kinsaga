@@ -73,6 +73,26 @@ pub fn escape_csv(s: &str) -> String {
     }
 }
 
+/// Escape a string for use inside a Markdown table cell.
+///
+/// Pipes are escaped and newlines become `<br>` so multi-line text
+/// cannot break the table structure.
+pub fn escape_md(s: &str) -> String {
+    s.replace('|', "\\|").replace('\r', "").replace('\n', "<br>")
+}
+
+/// Parse a `#RRGGBB` hex color into an `(r, g, b)` triple.
+pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some((r, g, b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +187,23 @@ mod tests {
     #[test]
     fn test_escape_csv_with_quote() {
         assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
+    }
+
+    #[test]
+    fn test_escape_md() {
+        assert_eq!(escape_md("plain text"), "plain text");
+        assert_eq!(escape_md("a | b"), "a \\| b");
+        assert_eq!(escape_md("line1\nline2"), "line1<br>line2");
+        assert_eq!(escape_md("line1\r\nline2"), "line1<br>line2");
+    }
+
+    #[test]
+    fn test_parse_hex_color() {
+        assert_eq!(parse_hex_color("#4A90D9"), Some((0x4A, 0x90, 0xD9)));
+        assert_eq!(parse_hex_color("#ffffff"), Some((255, 255, 255)));
+        assert_eq!(parse_hex_color("#000000"), Some((0, 0, 0)));
+        assert_eq!(parse_hex_color("4A90D9"), None, "missing #");
+        assert_eq!(parse_hex_color("#4A90D"), None, "too short");
+        assert_eq!(parse_hex_color("#GGGGGG"), None, "not hex");
     }
 }

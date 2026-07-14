@@ -5,10 +5,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use kinsaga::{
     add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
-    correct_uuids, escape_csv, format_attachment, format_date_display, format_location,
-    load, merge_chronicles, save, search, validate_chronicle,
-    AddFactOptions, AttachmentUpdate, ChronicleDate, EditFactOptions, Fact, FactFilter,
-    IssueType, LocationUpdate, MergeOptions, WithUpdate,
+    correct_uuids, escape_csv, escape_md, format_attachment, format_attachment_markdown,
+    format_date_display, format_location, load, merge_chronicles, parse_hex_color, save,
+    search, validate_chronicle,
+    AddFactOptions, AttachmentUpdate, Chronicle, ChronicleDate, EditFactOptions, Fact,
+    FactFilter, IssueType, LocationUpdate, MergeOptions, WithUpdate,
     ConflictStrategy as LibConflictStrategy, DuplicateStrategy as LibDuplicateStrategy,
 };
 use std::collections::HashMap;
@@ -406,6 +407,33 @@ fn main() -> Result<()> {
     }
 }
 
+/// Resolve a category ID to its display label (falls back to the ID).
+fn category_label<'a>(chronicle: &'a Chronicle, id: &'a str) -> &'a str {
+    chronicle
+        .find_category(id)
+        .map(|c| c.label.as_str())
+        .unwrap_or(id)
+}
+
+/// Print rows as CSV with proper escaping.
+fn print_csv(headers: &[&str], rows: &[Vec<String>]) {
+    println!("{}", headers.join(","));
+    for row in rows {
+        let cells: Vec<String> = row.iter().map(|c| escape_csv(c)).collect();
+        println!("{}", cells.join(","));
+    }
+}
+
+/// Print rows as a Markdown table with cell escaping.
+fn print_md_table(headers: &[&str], rows: &[Vec<String>]) {
+    println!("| {} |", headers.join(" | "));
+    println!("|{}|", vec!["---"; headers.len()].join("|"));
+    for row in rows {
+        let cells: Vec<String> = row.iter().map(|c| escape_md(c)).collect();
+        println!("| {} |", cells.join(" | "));
+    }
+}
+
 fn cmd_list(file: &PathBuf, format: &OutputFormat) -> Result<()> {
     let chronicle = load(file).context("Failed to load chronicle")?;
 
@@ -426,25 +454,15 @@ fn cmd_list(file: &PathBuf, format: &OutputFormat) -> Result<()> {
                 );
             }
         }
-        OutputFormat::Csv => {
-            println!("id,name,facts");
-            for person in &chronicle.persons {
-                println!(
-                    "{},{},{}",
-                    escape_csv(&person.id),
-                    escape_csv(&person.name),
-                    person.facts.len()
-                );
-            }
-        }
-        OutputFormat::Md => {
-            println!("| ID | Name | Facts |");
-            println!("|---|---|---:|");
-            for person in &chronicle.persons {
-                println!(
-                    "| {} | {} | {} |",
-                    person.id, person.name, person.facts.len()
-                );
+        OutputFormat::Csv | OutputFormat::Md => {
+            let rows: Vec<Vec<String>> = chronicle
+                .persons
+                .iter()
+                .map(|p| vec![p.id.clone(), p.name.clone(), p.facts.len().to_string()])
+                .collect();
+            match format {
+                OutputFormat::Csv => print_csv(&["id", "name", "facts"], &rows),
+                _ => print_md_table(&["ID", "Name", "Facts"], &rows),
             }
         }
         OutputFormat::Json => {
@@ -545,26 +563,14 @@ fn cmd_timeline(
                 // Format date display
                 let date_display = format_date_display(&fact.date);
 
-                // Format category
-                let cat_label = chronicle
-                    .find_category(&fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&fact.category);
-
-                let cat_display = format!("[{}]", cat_label);
-                let cat_colored = if let Some(_color) = category_colors.get(fact.category.as_str())
+                // Format category, colored with the user-defined hex color
+                let cat_display = format!("[{}]", category_label(&chronicle, &fact.category));
+                let cat_colored = match category_colors
+                    .get(fact.category.as_str())
+                    .and_then(|hex| parse_hex_color(hex))
                 {
-                    // Could parse hex color, but for simplicity use predefined colors
-                    match fact.category.as_str() {
-                        "education" => cat_display.blue(),
-                        "family" => cat_display.red(),
-                        "travel" => cat_display.green(),
-                        "hobby" => cat_display.yellow(),
-                        "circumstance" => cat_display.purple(),
-                        _ => cat_display.white(),
-                    }
-                } else {
-                    cat_display.white()
+                    Some((r, g, b)) => cat_display.truecolor(r, g, b),
+                    None => cat_display.normal(),
                 };
 
                 // Format shared indicator
@@ -599,80 +605,55 @@ fn cmd_timeline(
             println!();
         }
         OutputFormat::Csv => {
-            println!("date,category,text,with,shared_from,location,attachments");
-            for timeline_fact in &all_facts {
-                let fact = timeline_fact.fact;
-                let cat_label = chronicle
-                    .find_category(&fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&fact.category);
-                let with_str = fact
-                    .with
-                    .as_ref()
-                    .map(|w| w.join(";"))
-                    .unwrap_or_default();
-                let shared_from = timeline_fact.shared_from.unwrap_or("");
-                let location_str = fact
-                    .location
-                    .as_ref()
-                    .map(format_location)
-                    .unwrap_or_default();
-                let attachments_str: String = fact
-                    .attachments
-                    .iter()
-                    .map(|a| a.url.to_string())
-                    .collect::<Vec<_>>()
-                    .join(";");
-                println!(
-                    "{},{},{},{},{},{},{}",
-                    escape_csv(&fact.date),
-                    escape_csv(cat_label),
-                    escape_csv(&fact.text),
-                    escape_csv(&with_str),
-                    escape_csv(shared_from),
-                    escape_csv(&location_str),
-                    escape_csv(&attachments_str)
-                );
-            }
+            let rows: Vec<Vec<String>> = all_facts
+                .iter()
+                .map(|tf| {
+                    let fact = tf.fact;
+                    vec![
+                        fact.date.clone(),
+                        category_label(&chronicle, &fact.category).to_string(),
+                        fact.text.clone(),
+                        fact.with.as_ref().map(|w| w.join(";")).unwrap_or_default(),
+                        tf.shared_from.unwrap_or("").to_string(),
+                        fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        fact.attachments
+                            .iter()
+                            .map(|a| a.url.clone())
+                            .collect::<Vec<_>>()
+                            .join(";"),
+                    ]
+                })
+                .collect();
+            print_csv(
+                &["date", "category", "text", "with", "shared_from", "location", "attachments"],
+                &rows,
+            );
         }
         OutputFormat::Md => {
             println!("## {} - Timeline\n", person.name);
-            println!("| Date | Category | Event | With | Location | Attachments | Shared From |");
-            println!("|---|---|---|---|---|---|---|");
-            for timeline_fact in &all_facts {
-                let fact = timeline_fact.fact;
-                let cat_label = chronicle
-                    .find_category(&fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&fact.category);
-                let with_str = fact
-                    .with
-                    .as_ref()
-                    .map(|w| w.join(", "))
-                    .unwrap_or_default();
-                let shared_from = timeline_fact.shared_from.unwrap_or("");
-                let location_str = fact
-                    .location
-                    .as_ref()
-                    .map(format_location)
-                    .unwrap_or_default();
-                let attachments_str: String = fact
-                    .attachments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref title) = a.title {
-                            format!("[{}]({})", title, a.url)
-                        } else {
-                            format!("[link]({})", a.url)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!(
-                    "| {} | {} | {} | {} | {} | {} | {} |",
-                    fact.date, cat_label, fact.text, with_str, location_str, attachments_str, shared_from
-                );
-            }
+            let rows: Vec<Vec<String>> = all_facts
+                .iter()
+                .map(|tf| {
+                    let fact = tf.fact;
+                    vec![
+                        fact.date.clone(),
+                        category_label(&chronicle, &fact.category).to_string(),
+                        fact.text.clone(),
+                        fact.with.as_ref().map(|w| w.join(", ")).unwrap_or_default(),
+                        fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        fact.attachments
+                            .iter()
+                            .map(format_attachment_markdown)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        tf.shared_from.unwrap_or("").to_string(),
+                    ]
+                })
+                .collect();
+            print_md_table(
+                &["Date", "Category", "Event", "With", "Location", "Attachments", "Shared From"],
+                &rows,
+            );
         }
         OutputFormat::Json => {
             let json_facts: Vec<TimelineFactJson> = all_facts
@@ -727,10 +708,7 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
 
             for result in results {
                 let date_display = format_date_display(&result.fact.date);
-                let cat_label = chronicle
-                    .find_category(&result.fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&result.fact.category);
+                let cat_label = category_label(&chronicle, &result.fact.category);
 
                 println!(
                     "{}: {:<12} [{}] {}",
@@ -757,70 +735,54 @@ fn cmd_search(file: &PathBuf, query: &str, format: &OutputFormat, use_regex: boo
             }
         }
         OutputFormat::Csv => {
-            println!("person_id,person_name,date,category,text,location,attachments");
-            for result in results {
-                let cat_label = chronicle
-                    .find_category(&result.fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&result.fact.category);
-                let location_str = result
-                    .fact
-                    .location
-                    .as_ref()
-                    .map(format_location)
-                    .unwrap_or_default();
-                let attachments_str: String = result
-                    .fact
-                    .attachments
-                    .iter()
-                    .map(|a| a.url.to_string())
-                    .collect::<Vec<_>>()
-                    .join(";");
-                println!(
-                    "{},{},{},{},{},{},{}",
-                    escape_csv(&result.person.id),
-                    escape_csv(&result.person.name),
-                    escape_csv(&result.fact.date),
-                    escape_csv(cat_label),
-                    escape_csv(&result.fact.text),
-                    escape_csv(&location_str),
-                    escape_csv(&attachments_str)
-                );
-            }
+            let rows: Vec<Vec<String>> = results
+                .iter()
+                .map(|r| {
+                    vec![
+                        r.person.id.clone(),
+                        r.person.name.clone(),
+                        r.fact.date.clone(),
+                        category_label(&chronicle, &r.fact.category).to_string(),
+                        r.fact.text.clone(),
+                        r.fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        r.fact
+                            .attachments
+                            .iter()
+                            .map(|a| a.url.clone())
+                            .collect::<Vec<_>>()
+                            .join(";"),
+                    ]
+                })
+                .collect();
+            print_csv(
+                &["person_id", "person_name", "date", "category", "text", "location", "attachments"],
+                &rows,
+            );
         }
         OutputFormat::Md => {
             println!("## Search results for '{}'\n", query);
-            println!("| Person | Date | Category | Event | Location | Attachments |");
-            println!("|---|---|---|---|---|---|");
-            for result in results {
-                let cat_label = chronicle
-                    .find_category(&result.fact.category)
-                    .map(|c| c.label.as_str())
-                    .unwrap_or(&result.fact.category);
-                let location_str = result
-                    .fact
-                    .location
-                    .as_ref()
-                    .map(format_location)
-                    .unwrap_or_default();
-                let attachments_str: String = result
-                    .fact
-                    .attachments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref title) = a.title {
-                            format!("[{}]({})", title, a.url)
-                        } else {
-                            format!("[link]({})", a.url)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!(
-                    "| {} | {} | {} | {} | {} | {} |",
-                    result.person.name, result.fact.date, cat_label, result.fact.text, location_str, attachments_str
-                );
-            }
+            let rows: Vec<Vec<String>> = results
+                .iter()
+                .map(|r| {
+                    vec![
+                        r.person.name.clone(),
+                        r.fact.date.clone(),
+                        category_label(&chronicle, &r.fact.category).to_string(),
+                        r.fact.text.clone(),
+                        r.fact.location.as_ref().map(format_location).unwrap_or_default(),
+                        r.fact
+                            .attachments
+                            .iter()
+                            .map(format_attachment_markdown)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ]
+                })
+                .collect();
+            print_md_table(
+                &["Person", "Date", "Category", "Event", "Location", "Attachments"],
+                &rows,
+            );
         }
         OutputFormat::Json => {
             let json_results: Vec<SearchResultJson> = results

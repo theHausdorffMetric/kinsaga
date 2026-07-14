@@ -50,7 +50,10 @@ pub use facts::{
     FactError, LocationUpdate, TimelineFact, WithUpdate,
 };
 pub use filter::{filter_facts, search, FactFilter, SearchResult};
-pub use format::{escape_csv, format_attachment, format_attachment_markdown, format_date_display, format_location, truncate_text};
+pub use format::{
+    escape_csv, escape_md, format_attachment, format_attachment_markdown, format_date_display,
+    format_location, parse_hex_color, truncate_text,
+};
 pub use geocode::{
     apply_suggestions, count_facts_with_coordinates, count_facts_without_coordinates,
     fuzzy_match, suggest_coordinates, validate_gps, GeocodedPlace, GeocodeError,
