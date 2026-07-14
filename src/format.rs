@@ -47,12 +47,18 @@ pub fn format_attachment_markdown(attachment: &Attachment) -> String {
     }
 }
 
-/// Truncate text to a maximum length, adding ellipsis if needed.
+/// Truncate text to a maximum length in characters, adding ellipsis if needed.
+///
+/// Counts characters (not bytes), so multi-byte UTF-8 content is safe.
+/// The result never exceeds `max_len` characters.
 pub fn truncate_text(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
+    } else if max_len <= 3 {
+        ".".repeat(max_len)
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncated: String = s.chars().take(max_len - 3).collect();
+        format!("{truncated}...")
     }
 }
 
@@ -128,6 +134,28 @@ mod tests {
     #[test]
     fn test_truncate_text_long() {
         assert_eq!(truncate_text("Hello World!", 8), "Hello...");
+    }
+
+    #[test]
+    fn test_truncate_text_multibyte_at_boundary() {
+        // Byte-index slicing used to panic here ('ä' spans two bytes at the cut)
+        let s = "Wanderung auf die Mettmenalp, Schwändi GL";
+        let t = truncate_text(s, 38);
+        assert!(t.ends_with("..."));
+        assert_eq!(t.chars().count(), 38);
+    }
+
+    #[test]
+    fn test_truncate_text_cjk() {
+        assert_eq!(truncate_text("日本語のテキストです", 8), "日本語のテ...");
+    }
+
+    #[test]
+    fn test_truncate_text_tiny_max_len() {
+        assert_eq!(truncate_text("abcdef", 3), "...");
+        assert_eq!(truncate_text("abcdef", 2), "..");
+        assert_eq!(truncate_text("abcdef", 0), "");
+        assert_eq!(truncate_text("ab", 2), "ab");
     }
 
     #[test]

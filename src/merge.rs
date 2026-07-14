@@ -1,5 +1,6 @@
 //! Merge operations for chronicles.
 
+use crate::format::truncate_text;
 use crate::{Chronicle, Fact};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -353,14 +354,6 @@ pub fn merge_chronicles(
         events,
         warnings,
     })
-}
-
-fn truncate_text(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! Validation logic for chronicles.
 
+use crate::format::truncate_text;
 use crate::{Chronicle, ChronicleDate};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -243,15 +244,6 @@ pub fn is_valid_mime_type(s: &str) -> bool {
     };
 
     is_valid_part(type_part) && is_valid_part(subtype_part)
-}
-
-/// Truncate text to a maximum length, adding ellipsis if needed.
-fn truncate_text(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
 }
 
 #[cfg(test)]
