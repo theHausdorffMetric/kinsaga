@@ -1,0 +1,15 @@
+image: archlinux
+packages:
+  - rust
+sources:
+  - https://git.sr.ht/~danprobst/kinsaga
+tasks:
+  - fmt: |
+      cd kinsaga
+      cargo fmt --check
+  - clippy: |
+      cd kinsaga
+      cargo clippy --all-targets -- -D warnings
+  - test: |
+      cd kinsaga
+      cargo test

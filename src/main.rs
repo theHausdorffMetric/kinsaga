@@ -345,9 +345,6 @@ enum DuplicateStrategy {
 }
 
 fn main() -> Result<()> {
-    // Initialize logging (set RUST_LOG=warn or RUST_LOG=info to see logs)
-    env_logger::init();
-
     // Load .env file if present (before parsing CLI so env vars are available)
     dotenvy::dotenv().ok();
 
