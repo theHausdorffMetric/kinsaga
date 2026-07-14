@@ -345,9 +345,15 @@ a minimum-length threshold — strictly stronger; also fixes the same flaw insid
 **Step 1.5 — Release**
 - Bump to 0.2.1, changelog entry, tag.
 
-### Phase 2 — Data safety & CLI contract → release v0.3.0
+### Phase 2 — Data safety & CLI contract → release v0.3.0 ✅ DONE (2026-07-14)
 
 User-visible behavior changes (exit codes, output streams) ⇒ minor version bump.
+Implemented: F3 (`b5533fc`), F4+F5+F6+F32 (`c90851a`), integration tests (`deab268`).
+Decisions taken: `validate --correct`/`--apply` without `--in-place` always emit
+the full JSON (redirects yield a complete file even when nothing changed); exit
+code reflects the post-correction state, so `--correct` runs exit 0 once errors
+are fixed. Bonus: add-fact/edit-fact dry-run vs. saved print duplication removed
+(part of F19); writes got a proper `IoError::WriteError` variant.
 
 **Step 2.1 — Atomic save (F3)**
 - Promote `tempfile` to `[dependencies]`.

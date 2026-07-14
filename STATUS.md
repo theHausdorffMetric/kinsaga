@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2026-01-03 (GPS validation implemented)
+**Last Updated:** 2026-07-14 (correctness fixes + CLI contract, see CODE_REVIEW.md)
 
 ## Overview
 
@@ -63,10 +63,11 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--to <year>` | timeline | Filter to year (inclusive) |
 | `--include-shared` | timeline | Include facts from others where this person is in their `with` field |
 | `--correct` | validate | Generate valid UUIDs for invalid/missing/duplicate and output JSON to stdout |
-| `--in-place` | validate | Write corrected JSON back to the input file (requires `--correct`) |
+| `--in-place` | validate | Write changes back to the input file (requires `--correct` or `--apply`) |
 | `--gps` | validate | Validate GPS coordinates against Nominatim (reverse geocoding) |
 | `--suggest` | validate | Suggest GPS coordinates for locations without them (requires `--gps`) |
 | `--apply` | validate | Apply suggested GPS coordinates to the chronicle (requires `--suggest`) |
+| `--strict` | validate | Exit non-zero on warnings, not just errors |
 | `--date <date>` / `-d` | add-fact | Date (ISO 8601, required) |
 | `--category <cat>` / `-c` | add-fact | Category ID (required) |
 | `--text <text>` / `-t` | add-fact | Event description (required) |
@@ -99,6 +100,21 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | `--clear-attachments` | edit-fact | Clear all attachments |
 | `--dry-run` | edit-fact | Preview without saving |
 
+#### Output Streams & Exit Codes
+
+- **stdout carries only data:** query output (`list`/`timeline`/`search`),
+  JSON/CSV/Markdown payloads, corrected/updated JSON from
+  `validate --correct`/`--apply`, and `schema`. All progress, reports, and
+  status messages go to **stderr**, so redirecting stdout always yields a
+  clean, parseable file (e.g. `kinsaga validate --correct > corrected.json`).
+- `validate --correct`/`--apply` without `--in-place` always emit the full
+  chronicle JSON to stdout — even when nothing needed fixing — so redirect
+  workflows produce a complete file.
+- **Exit codes:** `validate` exits non-zero when error-level issues remain
+  (corrections applied via `--correct` count as resolved). With `--strict`,
+  warnings also cause a non-zero exit. This makes
+  `kinsaga validate --strict && …` usable in scripts and CI.
+
 #### Validation Checks
 | Check | Level | Description |
 |-------|-------|-------------|
@@ -113,8 +129,9 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 
 ### Tests
-- 87 unit tests + 1 doc test (all passing)
-- Test coverage across all library modules
+- 99 unit tests + 15 CLI integration tests + 1 doc test (all passing)
+- Test coverage across all library modules; integration tests cover exit
+  codes, stream separation, and mutation roundtrips (`tests/cli.rs`)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
 
 ### Example Data
@@ -157,21 +174,23 @@ kinsaga/
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-uuid = { version = "1.19", features = ["v4"] }
-clap = { version = "4.5", features = ["derive", "env"] }
+uuid = { version = "1.23", features = ["v4"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 dotenvy = "0.15"
-colored = "3.0"
+colored = "3.1"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
 chrono = "0.4"
-url = "2.5"
-regex = "1.12"
-ureq = "3.0"
+url = { version = "2.5", features = ["serde"] }
+regex = "1.13"
+tempfile = "3.27"
+ureq = "3.3"
 urlencoding = "2.1"
 
 [dev-dependencies]
-tempfile = "3.24"
+assert_cmd = "2.0"
+predicates = "3.1"
 ```
 
 ## Schema Design

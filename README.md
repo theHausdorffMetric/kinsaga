@@ -65,6 +65,17 @@ kinsaga add-fact alice -d 2024-07-15 -c travel -t "Trip to Paris" --country Fran
 
 All query commands support `--format` / `-f` with: `text` (default), `csv`, `md`, `json`
 
+### Scripting
+
+stdout carries only data; all progress and reports go to stderr, so redirects
+always yield clean output. `validate` exits non-zero when errors are found
+(`--strict` also fails on warnings):
+
+```bash
+kinsaga validate --strict && echo "chronicle ok"
+kinsaga validate --correct > corrected.json
+```
+
 ### GPS Validation
 
 Validate and enrich location data using OpenStreetMap's Nominatim:
