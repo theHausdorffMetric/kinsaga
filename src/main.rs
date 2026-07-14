@@ -269,6 +269,44 @@ enum Commands {
         dry_run: bool,
     },
 
+    /// Add a new person to the chronicle
+    AddPerson {
+        /// Person ID (lowercase, e.g. "alice")
+        id: String,
+
+        /// Display name (e.g. "Alice Smith")
+        #[arg(short, long)]
+        name: String,
+
+        /// Preview without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Remove a person and all their facts
+    RemovePerson {
+        /// Person ID to remove
+        id: String,
+
+        /// Remove even if other facts reference this person in 'with' (the references are stripped)
+        #[arg(long)]
+        force: bool,
+
+        /// Preview without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Remove a fact by UUID
+    RemoveFact {
+        /// UUID of the fact to remove
+        uuid: String,
+
+        /// Preview without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Print the JSON Schema for chronicle files
     Schema,
 }
@@ -403,6 +441,11 @@ fn main() -> Result<()> {
             clear_attachments,
             dry_run,
         ),
+        Commands::AddPerson { id, name, dry_run } => cmd_add_person(&input, &id, &name, dry_run),
+        Commands::RemovePerson { id, force, dry_run } => {
+            cmd_remove_person(&input, &id, force, dry_run)
+        }
+        Commands::RemoveFact { uuid, dry_run } => cmd_remove_fact(&input, &uuid, dry_run),
         Commands::Schema => unreachable!(), // Handled above
     }
 }
@@ -1507,6 +1550,66 @@ fn cmd_merge(
         save(target_file, &result.chronicle).context("Failed to save merged chronicle")?;
         eprintln!("{}", format!("✓ Saved to {}", target_file.display()).green());
     }
+
+    Ok(())
+}
+
+fn cmd_add_person(file: &PathBuf, id: &str, name: &str, dry_run: bool) -> Result<()> {
+    let mut chronicle = load(file).context("Failed to load chronicle")?;
+    kinsaga::add_person(&mut chronicle, id, name)?;
+
+    if dry_run {
+        eprintln!("{}", "Dry run - not saving changes".yellow());
+        eprintln!("Would add person '{}' ({})", id, name);
+    } else {
+        save(file, &chronicle).context("Failed to save chronicle")?;
+        eprintln!("{}", format!("✓ Added person '{}' ({})", id, name).green());
+    }
+
+    Ok(())
+}
+
+fn cmd_remove_person(file: &PathBuf, id: &str, force: bool, dry_run: bool) -> Result<()> {
+    let mut chronicle = load(file).context("Failed to load chronicle")?;
+    let result = kinsaga::remove_person(&mut chronicle, id, force)?;
+
+    let summary = format!(
+        "person '{}' ({}) with {} fact(s); {} 'with' reference(s) stripped",
+        id,
+        result.person.name,
+        result.person.facts.len(),
+        result.references_stripped
+    );
+    if dry_run {
+        eprintln!("{}", "Dry run - not saving changes".yellow());
+        eprintln!("Would remove {}", summary);
+    } else {
+        save(file, &chronicle).context("Failed to save chronicle")?;
+        eprintln!("{}", format!("✓ Removed {}", summary).green());
+    }
+
+    Ok(())
+}
+
+fn cmd_remove_fact(file: &PathBuf, uuid: &str, dry_run: bool) -> Result<()> {
+    let mut chronicle = load(file).context("Failed to load chronicle")?;
+    let result = kinsaga::remove_fact(&mut chronicle, uuid)?;
+
+    if dry_run {
+        eprintln!("{}", "Dry run - not saving changes".yellow());
+        eprintln!("Would remove fact from {}:", result.person_name.bold());
+    } else {
+        save(file, &chronicle).context("Failed to save chronicle")?;
+        eprintln!("{}", "Fact removed".green());
+        eprintln!("From {}:", result.person_name.bold());
+    }
+    eprintln!(
+        "  {} {} [{}] {}",
+        "●".cyan(),
+        result.fact.date,
+        category_label(&chronicle, &result.fact.category),
+        result.fact.text
+    );
 
     Ok(())
 }

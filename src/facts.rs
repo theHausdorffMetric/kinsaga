@@ -453,6 +453,36 @@ fn find_fact_by_id(chronicle: &Chronicle, fact_id: &str) -> Option<(usize, usize
     None
 }
 
+/// Result of removing a fact.
+#[derive(Debug)]
+pub struct RemoveFactResult {
+    /// Person ID who owned the fact
+    pub person_id: String,
+    /// Person's display name
+    pub person_name: String,
+    /// The removed fact
+    pub fact: Fact,
+}
+
+/// Remove a fact by UUID.
+pub fn remove_fact(
+    chronicle: &mut Chronicle,
+    fact_id: &str,
+) -> Result<RemoveFactResult, FactError> {
+    let (person_idx, fact_idx) =
+        find_fact_by_id(chronicle, fact_id).ok_or_else(|| FactError::FactNotFound {
+            id: fact_id.to_string(),
+        })?;
+    let person_id = chronicle.persons[person_idx].id.clone();
+    let person_name = chronicle.persons[person_idx].name.clone();
+    let fact = chronicle.persons[person_idx].facts.remove(fact_idx);
+    Ok(RemoveFactResult {
+        person_id,
+        person_name,
+        fact,
+    })
+}
+
 /// Edit an existing fact by UUID.
 ///
 /// Finds the fact across all persons and applies the specified updates.

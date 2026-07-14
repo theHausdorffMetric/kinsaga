@@ -343,6 +343,93 @@ fn merge_dry_run_reports_on_stderr_only() {
 }
 
 #[test]
+fn add_person_roundtrip() {
+    let tmp = temp_copy_of_sample();
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["add-person", "carol", "--name", "Carol White"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let chronicle = kinsaga::load(tmp.path()).unwrap();
+    assert_eq!(chronicle.find_person("carol").unwrap().name, "Carol White");
+
+    // A duplicate ID is rejected
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["add-person", "carol", "--name", "Another Carol"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+
+    // An invalid ID is rejected
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["add-person", "Dave", "--name", "Dave"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid person ID"));
+}
+
+#[test]
+fn remove_fact_roundtrip() {
+    let tmp = temp_copy_of_sample();
+    let uuid = "b8c9d0e1-f2a3-4567-1234-678901234567";
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["remove-fact", uuid])
+        .assert()
+        .success();
+
+    let chronicle = kinsaga::load(tmp.path()).unwrap();
+    assert!(!chronicle
+        .persons
+        .iter()
+        .flat_map(|p| &p.facts)
+        .any(|f| f.id == uuid));
+}
+
+#[test]
+fn remove_person_requires_force_when_referenced() {
+    let tmp = temp_copy_of_sample();
+
+    // bob is referenced by alice's facts ('with'), so removal is refused
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["remove-person", "bob"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--force"));
+
+    // With --force the person goes away and references are stripped
+    kinsaga()
+        .arg("-i")
+        .arg(tmp.path())
+        .args(["remove-person", "bob", "--force"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("reference(s) stripped"));
+
+    let chronicle = kinsaga::load(tmp.path()).unwrap();
+    assert!(chronicle.find_person("bob").is_none());
+    let stale_refs = chronicle
+        .persons
+        .iter()
+        .flat_map(|p| &p.facts)
+        .filter_map(|f| f.with.as_ref())
+        .flatten()
+        .filter(|id| *id == "bob")
+        .count();
+    assert_eq!(stale_refs, 0, "no dangling 'with' references remain");
+}
+
+#[test]
 fn schema_outputs_valid_json() {
     let output = kinsaga().arg("schema").output().unwrap();
     assert!(output.status.success());

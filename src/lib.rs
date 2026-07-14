@@ -41,13 +41,14 @@ pub mod geocode;
 pub mod io;
 pub mod merge;
 pub mod model;
+pub mod persons;
 pub mod validate;
 
 pub use date::{cmp_date_strings, ChronicleDate, DateError};
 pub use facts::{
     add_fact, build_attachments, build_location, collect_timeline_facts, edit_fact,
-    AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions, EditFactResult,
-    FactError, LocationUpdate, TimelineFact, WithUpdate,
+    remove_fact, AddFactOptions, AddFactResult, AttachmentUpdate, EditFactOptions,
+    EditFactResult, FactError, LocationUpdate, RemoveFactResult, TimelineFact, WithUpdate,
 };
 pub use filter::{filter_facts, search, FactFilter, SearchResult};
 pub use format::{
@@ -65,6 +66,7 @@ pub use merge::{
     MergeEventType, MergeItemType, MergeOptions, MergeResult, MergeStats,
 };
 pub use model::{Attachment, Category, Chronicle, Coordinates, Fact, Location, Person};
+pub use persons::{add_person, remove_person, PersonError, RemovePersonResult};
 pub use validate::{
     correct_uuids, is_valid_id, is_valid_mime_type, validate_chronicle, IssueType,
     ValidationIssue, ValidationResult,
