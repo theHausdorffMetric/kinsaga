@@ -149,6 +149,10 @@ See [STATUS.md](https://git.sr.ht/~danprobst/kinsaga/tree/master/item/STATUS.md)
 - Validation checks
 - Project roadmap
 
+A Claude Code skill for this CLI ships in `claude_skill/SKILL.md`
+(drift-guarded against `--help` by `tests/skill_doc_sync.rs`; install
+notes in STATUS.md).
+
 ## License
 
 Licensed under GPL-3.0-or-later.

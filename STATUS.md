@@ -150,7 +150,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Diverged shared fact | Warning | Propagated copies (reciprocal `with`, same date, same text) differ in category or location — one side was edited. Not compared: attachments (each side keeps its own photos) and text wording (perspective-phrased pairs like "Married Bob"/"Married Alice" are legitimate; only a category disagreement flags those) |
 
 ### Tests
-- 141 unit tests + 23 CLI integration tests + 1 doc test (all passing)
+- 142 unit tests + 23 CLI integration tests + 2 skill-doc-sync tests + 1 doc test (all passing)
 - Test coverage across all library modules; integration tests cover exit
   codes, stream separation, and mutation roundtrips (`tests/cli.rs`)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
@@ -167,10 +167,13 @@ kinsaga/
 ├── CODE_REVIEW.md          # 2026-07 review findings + implementation log
 ├── .build.yml              # builds.sr.ht CI (fmt, clippy, tests)
 ├── schema.json             # JSON Schema for chronicle files (embedded in CLI)
+├── claude_skill/
+│   └── SKILL.md            # Claude Code skill for the CLI (see below)
 ├── examples/
 │   └── sample-chronicle.json
 ├── tests/
-│   └── cli.rs              # CLI integration tests (assert_cmd)
+│   ├── cli.rs              # CLI integration tests (assert_cmd)
+│   └── skill_doc_sync.rs   # SKILL.md ↔ CLI drift guard
 └── src/
     ├── lib.rs              # Library exports
     ├── main.rs             # CLI application (thin wrapper over library)
@@ -184,6 +187,27 @@ kinsaga/
     ├── persons.rs          # Person operations (add_person, remove_person)
     ├── format.rs           # Display formatting (format_location, escape_csv)
     └── geocode.rs          # Nominatim geocoding (validate_gps, suggest_coordinates)
+```
+
+## Claude Code skill
+
+`claude_skill/SKILL.md` teaches Claude Code the CLI (same pattern as
+mindtask's in-repo skill): trigger description in the frontmatter,
+`allowed-tools: Bash(kinsaga *)`, then the parts an agent needs in order —
+input-file resolution, the stdout/stderr + exit-code scripting contract,
+the full command reference, the shared-fact copy semantics, and the
+gotchas (GPS privacy + rate limit, merge dedup key, `--dry-run` habit).
+
+Two guards keep it honest, `tests/skill_doc_sync.rs` (run by `cargo
+test` and CI): every command `kinsaga --help` advertises must be
+mentioned in the skill, and the frontmatter `documents-version` must
+match the crate version — bump it when cutting a release. Both the skill
+and its test are excluded from the published package.
+
+**Install** by symlinking the directory (stays in sync with the repo):
+
+```bash
+mkdir -p ~/.claude/skills && ln -sn ~/dev/kinsaga/claude_skill ~/.claude/skills/kinsaga
 ```
 
 ## Configuration
