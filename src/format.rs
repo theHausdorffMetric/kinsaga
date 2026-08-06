@@ -64,9 +64,9 @@ pub fn truncate_text(s: &str, max_len: usize) -> String {
 
 /// Escape a string for CSV output.
 ///
-/// Wraps in quotes if contains comma, quote, or newline.
+/// Wraps in quotes if contains comma, quote, or line break (`\n` or `\r`).
 pub fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
@@ -192,6 +192,12 @@ mod tests {
     #[test]
     fn test_escape_csv_with_quote() {
         assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
+    }
+
+    #[test]
+    fn test_escape_csv_with_line_breaks() {
+        assert_eq!(escape_csv("a\nb"), "\"a\nb\"");
+        assert_eq!(escape_csv("a\rb"), "\"a\rb\"", "bare CR must quote too");
     }
 
     #[test]

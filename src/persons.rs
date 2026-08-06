@@ -78,10 +78,16 @@ pub fn remove_person(
         });
     }
 
-    // Strip any remaining references, dropping 'with' lists that become empty
+    // Strip any remaining references, dropping 'with' lists that become
+    // empty. Same scope as the count above: the removed person's own facts
+    // are deleted wholesale below, so a (malformed) self-reference there
+    // neither blocks removal nor inflates `references_stripped`.
     let mut references_stripped = 0;
     if reference_count > 0 {
         for person in &mut chronicle.persons {
+            if person.id == id {
+                continue;
+            }
             for fact in &mut person.facts {
                 if let Some(ref mut with) = fact.with {
                     let before = with.len();
@@ -188,6 +194,23 @@ mod tests {
                 .with
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_remove_person_self_reference_neither_blocks_nor_counts() {
+        // A (hand-edited) self-reference in the removed person's own facts:
+        // it must not block removal without --force, and must not inflate
+        // references_stripped — count and strip use the same scope.
+        let mut chronicle = create_test_chronicle();
+        chronicle.find_person_mut("bob").unwrap().facts.push(
+            Fact::new("uuid-2", "2021-01-01", "family", "Self ref")
+                .with_persons(vec!["bob".to_string()]),
+        );
+
+        let result = remove_person(&mut chronicle, "bob", true).unwrap();
+        // Only alice's reference counts; bob's self-reference vanished with him
+        assert_eq!(result.references_stripped, 1);
+        assert!(chronicle.find_person("bob").is_none());
     }
 
     #[test]

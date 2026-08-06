@@ -187,7 +187,7 @@ pub fn merge_chronicles(
     for source_person in &source.persons {
         if target_person_ids.contains(&source_person.id) {
             // Person exists - merge facts
-            let (target_name, existing_facts): (String, HashSet<(String, String, String)>) = {
+            let (target_name, mut existing_facts): (String, HashSet<(String, String, String)>) = {
                 let target_person = target.find_person(&source_person.id).unwrap();
                 let facts: HashSet<(String, String, String)> = target_person
                     .facts
@@ -278,6 +278,10 @@ pub fn merge_chronicles(
                 let mut new_fact = source_fact.clone();
                 new_fact.id = new_uuid;
                 facts_to_add.push(new_fact);
+                // Record the key so a duplicate of this fact *later in the
+                // same source* is seen by the Skip check too, not only
+                // duplicates of facts already in the target
+                existing_facts.insert(fact_key);
                 facts_added += 1;
                 stats.facts_added += 1;
             }
@@ -499,6 +503,42 @@ mod tests {
 
         assert_eq!(result.chronicle.persons[0].facts.len(), 1);
         assert_eq!(result.stats.facts_skipped, 1);
+    }
+
+    #[test]
+    fn test_merge_source_internal_duplicate_facts_skipped() {
+        // Two identical facts *within the source* — Skip must let only one
+        // through, not just dedupe against the target
+        let mut target = Chronicle::new("1.0");
+        target.categories.push(Category::new("family", "Family"));
+        target.persons.push(Person::new("alice", "Alice"));
+
+        let mut source = Chronicle::new("1.0");
+        source.categories.push(Category::new("family", "Family"));
+        let mut alice = Person::new("alice", "Alice");
+        alice
+            .facts
+            .push(Fact::new("uuid-1", "2020-01-01", "family", "Same event"));
+        alice
+            .facts
+            .push(Fact::new("uuid-2", "2020-01-01", "family", "Same event"));
+        source.persons.push(alice);
+
+        let result = merge_chronicles(target, &source, &MergeOptions::default()).unwrap();
+        assert_eq!(result.chronicle.persons[0].facts.len(), 1);
+        assert_eq!(result.stats.facts_added, 1);
+        assert_eq!(result.stats.facts_skipped, 1);
+
+        // With DuplicateStrategy::Add both are kept (with distinct UUIDs)
+        let mut target = Chronicle::new("1.0");
+        target.categories.push(Category::new("family", "Family"));
+        target.persons.push(Person::new("alice", "Alice"));
+        let options = MergeOptions {
+            duplicates: DuplicateStrategy::Add,
+            ..Default::default()
+        };
+        let result = merge_chronicles(target, &source, &options).unwrap();
+        assert_eq!(result.chronicle.persons[0].facts.len(), 2);
     }
 
     #[test]
