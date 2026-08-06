@@ -1,6 +1,7 @@
 image: archlinux
 packages:
   - rust
+  - cargo-audit
 sources:
   - https://git.sr.ht/~danprobst/kinsaga
 tasks:
@@ -13,3 +14,6 @@ tasks:
   - test: |
       cd kinsaga
       cargo test
+  - audit: |
+      cd kinsaga
+      cargo audit

@@ -163,11 +163,12 @@ impl NominatimClient {
         query: &str,
         limit: usize,
     ) -> Result<Vec<GeocodedPlace>, GeocodeError> {
+        // form_urlencoded (from the url crate already in-tree) encodes the
+        // query; spaces become '+', which Nominatim accepts in query strings
+        let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
         let url = format!(
             "{}/search?q={}&format=json&addressdetails=1&limit={}",
-            self.base_url,
-            urlencoding::encode(query),
-            limit
+            self.base_url, encoded, limit
         );
         let body = self.get(&url)?;
         let places = parse_search_response(&body)?;

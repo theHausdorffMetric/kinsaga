@@ -211,7 +211,6 @@ url = { version = "2.5", features = ["serde"] }
 regex = "1.13"
 tempfile = "3.27"
 ureq = "3.3"
-urlencoding = "2.1"
 rust_iso3166 = "0.2"
 
 [dev-dependencies]
