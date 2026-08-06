@@ -10,7 +10,7 @@ repository = "https://git.sr.ht/~danprobst/kinsaga"
 keywords = ["family", "chronicle", "genealogy", "timeline", "history"]
 categories = ["command-line-utilities", "data-structures"]
 readme = "README.md"
-exclude = ["STATUS.md", "CODE_REVIEW.md", ".build.yml"]
+exclude = ["STATUS.md", "CODE_REVIEW.md", "CODE_REVIEW-2026-08.md", ".build.yml"]
 
 [[bin]]
 name = "kinsaga"
