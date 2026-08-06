@@ -37,6 +37,7 @@ pub enum IssueType {
     ImplausibleDate,
     EmptyName,
     UnknownVersion,
+    DivergedSharedFact,
 }
 
 impl IssueType {
@@ -323,7 +324,91 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
         }
     }
 
+    detect_shared_fact_drift(chronicle, &mut result);
+
     result
+}
+
+/// Detect diverged copies of propagated shared facts.
+///
+/// `add_fact --propagate` stores one fact copy per involved person, linked
+/// only by reciprocal `with` references (a documented design decision) —
+/// nothing keeps the copies in sync afterwards. For every unordered person
+/// pair and date carrying reciprocal references, the copies on both sides
+/// are matched by `(category, text)`; a fact left unmatched on *both* sides
+/// looks like a propagation pair where one copy was edited, and warns.
+/// Distinct shared events on the same date pair up cleanly and stay silent.
+fn detect_shared_fact_drift(chronicle: &Chronicle, result: &mut ValidationResult) {
+    use crate::format::truncate_text;
+    use crate::model::Fact;
+
+    let mut processed: HashSet<(usize, usize, &str)> = HashSet::new();
+
+    let references = |fact: &Fact, other_id: &str| {
+        fact.with
+            .as_ref()
+            .is_some_and(|w| w.iter().any(|x| x == other_id))
+    };
+
+    for (i, person) in chronicle.persons.iter().enumerate() {
+        for fact in &person.facts {
+            let Some(with) = &fact.with else { continue };
+            for other_id in with {
+                let Some(j) = chronicle.persons.iter().position(|q| &q.id == other_id) else {
+                    continue; // dangling reference, warned above
+                };
+                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+                if lo == hi || !processed.insert((lo, hi, fact.date.as_str())) {
+                    continue;
+                }
+                let (pa, pb) = (&chronicle.persons[lo], &chronicle.persons[hi]);
+                let side_a: Vec<&Fact> = pa
+                    .facts
+                    .iter()
+                    .filter(|f| f.date == fact.date && references(f, &pb.id))
+                    .collect();
+                let mut side_b: Vec<&Fact> = pb
+                    .facts
+                    .iter()
+                    .filter(|f| f.date == fact.date && references(f, &pa.id))
+                    .collect();
+                if side_a.is_empty() || side_b.is_empty() {
+                    continue;
+                }
+
+                // Greedy exact matching; what remains unmatched on both
+                // sides pairs up as drift candidates
+                let mut unmatched_a: Vec<&Fact> = Vec::new();
+                for fa in side_a {
+                    match side_b
+                        .iter()
+                        .position(|fb| fb.category == fa.category && fb.text == fa.text)
+                    {
+                        Some(pos) => {
+                            side_b.remove(pos);
+                        }
+                        None => unmatched_a.push(fa),
+                    }
+                }
+                for (fa, fb) in unmatched_a.iter().zip(side_b.iter()) {
+                    result.warnings.push(ValidationIssue {
+                        person_id: pa.id.clone(),
+                        fact_id: Some(fa.id.clone()),
+                        message: format!(
+                            "Shared fact '{}' ({}) on {} diverged from its copy on '{}' ('{}', {})",
+                            truncate_text(&fa.text, 30),
+                            fa.id,
+                            fa.date,
+                            pb.id,
+                            truncate_text(&fb.text, 30),
+                            fb.id
+                        ),
+                        issue_type: IssueType::DivergedSharedFact,
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Generate new UUIDs for facts with empty, invalid, or duplicate UUIDs.
@@ -603,6 +688,85 @@ mod tests {
                 .iter()
                 .any(|i| i.issue_type == IssueType::DuplicatePersonId)
         );
+    }
+
+    #[test]
+    fn test_validate_diverged_shared_fact_detected() {
+        use crate::facts::{AddFactOptions, EditFactOptions, add_fact, edit_fact};
+
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        chronicle.persons.push(Person::new("alice", "Alice"));
+        chronicle.persons.push(Person::new("bob", "Bob"));
+
+        let added = add_fact(
+            &mut chronicle,
+            "alice",
+            AddFactOptions {
+                date: "2024-06-01".to_string(),
+                category: "family".to_string(),
+                text: "Picnic".to_string(),
+                with: Some(vec!["bob".to_string()]),
+                propagate: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Healthy propagation validates clean
+        assert!(validate_chronicle(&chronicle).is_valid());
+
+        // Edit one copy only → the pair is flagged
+        let alice_fact_id = added.facts_added[0].2.clone();
+        edit_fact(
+            &mut chronicle,
+            &alice_fact_id,
+            EditFactOptions {
+                text: Some("Picnic at the lake".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let result = validate_chronicle(&chronicle);
+        let drift: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|i| i.issue_type == IssueType::DivergedSharedFact)
+            .collect();
+        assert_eq!(drift.len(), 1, "exactly one drift pair");
+        assert!(drift[0].message.contains("Picnic at the lake"));
+        assert!(drift[0].message.contains("bob"));
+    }
+
+    #[test]
+    fn test_validate_distinct_shared_events_same_date_stay_clean() {
+        use crate::facts::{AddFactOptions, add_fact};
+
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        chronicle.persons.push(Person::new("alice", "Alice"));
+        chronicle.persons.push(Person::new("bob", "Bob"));
+
+        // Two different shared events on the same date: every copy pairs up
+        // exactly, so drift detection must stay silent
+        for text in ["Breakfast together", "Evening concert"] {
+            add_fact(
+                &mut chronicle,
+                "alice",
+                AddFactOptions {
+                    date: "2024-06-01".to_string(),
+                    category: "family".to_string(),
+                    text: text.to_string(),
+                    with: Some(vec!["bob".to_string()]),
+                    propagate: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        assert!(validate_chronicle(&chronicle).is_valid());
     }
 
     #[test]
