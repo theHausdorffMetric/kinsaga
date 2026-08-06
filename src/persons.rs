@@ -16,6 +16,9 @@ pub enum PersonError {
     #[error("Invalid person ID '{id}': must match ^[a-z][a-z0-9_-]*$")]
     InvalidId { id: String },
 
+    #[error("Person name cannot be empty")]
+    EmptyName,
+
     #[error(
         "Person '{id}' is referenced in the 'with' field of {count} fact(s); \
          use --force to remove anyway and strip the references"
@@ -27,6 +30,9 @@ pub enum PersonError {
 pub fn add_person(chronicle: &mut Chronicle, id: &str, name: &str) -> Result<(), PersonError> {
     if !is_valid_id(id) {
         return Err(PersonError::InvalidId { id: id.to_string() });
+    }
+    if name.trim().is_empty() {
+        return Err(PersonError::EmptyName);
     }
     if chronicle.find_person(id).is_some() {
         return Err(PersonError::DuplicateId { id: id.to_string() });
@@ -143,6 +149,19 @@ mod tests {
         let mut chronicle = create_test_chronicle();
         let result = add_person(&mut chronicle, "alice", "Another Alice");
         assert!(matches!(result, Err(PersonError::DuplicateId { .. })));
+    }
+
+    #[test]
+    fn test_add_person_empty_name_rejected() {
+        let mut chronicle = create_test_chronicle();
+        assert!(matches!(
+            add_person(&mut chronicle, "carol", ""),
+            Err(PersonError::EmptyName)
+        ));
+        assert!(matches!(
+            add_person(&mut chronicle, "carol", "   "),
+            Err(PersonError::EmptyName)
+        ));
     }
 
     #[test]

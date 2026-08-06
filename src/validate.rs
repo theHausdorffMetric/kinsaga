@@ -34,6 +34,9 @@ pub enum IssueType {
     InvalidMimeType,
     InvalidUrl,
     InvalidId,
+    ImplausibleDate,
+    EmptyName,
+    UnknownVersion,
 }
 
 impl IssueType {
@@ -83,6 +86,21 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
     result.person_count = chronicle.persons.len();
     result.fact_count = chronicle.persons.iter().map(|p| p.facts.len()).sum();
 
+    // Schema-version gate: unknown versions still load (forward
+    // compatibility), but the reader should know the 1.0 rules below may
+    // not be the right ones for this file
+    if chronicle.version != "1.0" {
+        result.warnings.push(ValidationIssue {
+            person_id: String::new(),
+            fact_id: None,
+            message: format!(
+                "Unknown schema version '{}' (this kinsaga validates version 1.0)",
+                chronicle.version
+            ),
+            issue_type: IssueType::UnknownVersion,
+        });
+    }
+
     // Build category ID set for reference checking; duplicate category IDs
     // are an error (find_category silently returns the first match)
     let mut category_ids: HashSet<&str> = HashSet::new();
@@ -104,6 +122,14 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                     category.id
                 ),
                 issue_type: IssueType::InvalidId,
+            });
+        }
+        if category.label.trim().is_empty() {
+            result.warnings.push(ValidationIssue {
+                person_id: String::new(),
+                fact_id: None,
+                message: format!("Category '{}' has an empty label", category.id),
+                issue_type: IssueType::EmptyName,
             });
         }
     }
@@ -129,6 +155,14 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                     person.id
                 ),
                 issue_type: IssueType::InvalidId,
+            });
+        }
+        if person.name.trim().is_empty() {
+            result.warnings.push(ValidationIssue {
+                person_id: person.id.clone(),
+                fact_id: None,
+                message: format!("Person '{}' has an empty name", person.id),
+                issue_type: IssueType::EmptyName,
             });
         }
     }
@@ -188,14 +222,33 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
                 });
             }
 
-            // Date validation
-            if let Err(e) = ChronicleDate::parse(&fact.date) {
-                result.warnings.push(ValidationIssue {
-                    person_id: person.id.clone(),
-                    fact_id: Some(fact.id.clone()),
-                    message: format!("Invalid date '{}' - {}", fact.date, e),
-                    issue_type: IssueType::InvalidDate,
-                });
+            // Date validation. Parsing stays lenient about the calendar
+            // (existing files must keep loading), so a well-formed but
+            // impossible day (e.g. Feb 31) is a separate warning here.
+            match ChronicleDate::parse(&fact.date) {
+                Err(e) => {
+                    result.warnings.push(ValidationIssue {
+                        person_id: person.id.clone(),
+                        fact_id: Some(fact.id.clone()),
+                        message: format!("Invalid date '{}' - {}", fact.date, e),
+                        issue_type: IssueType::InvalidDate,
+                    });
+                }
+                Ok(date) => {
+                    if let (Some(y), Some(m), Some(d)) = (date.year, date.month, date.day)
+                        && jiff::civil::Date::new(y as i16, m as i8, d as i8).is_err()
+                    {
+                        result.warnings.push(ValidationIssue {
+                            person_id: person.id.clone(),
+                            fact_id: Some(fact.id.clone()),
+                            message: format!(
+                                "Implausible date '{}' - day {} does not exist in {}-{:02}",
+                                fact.date, d, y, m
+                            ),
+                            issue_type: IssueType::ImplausibleDate,
+                        });
+                    }
+                }
             }
 
             // 'with' references validation
@@ -416,6 +469,67 @@ mod tests {
         assert!(!result.is_valid());
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].issue_type, IssueType::InvalidUuid);
+    }
+
+    #[test]
+    fn test_validate_unknown_version_warns() {
+        let chronicle = Chronicle::new("2.0");
+        let result = validate_chronicle(&chronicle);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].issue_type, IssueType::UnknownVersion);
+
+        assert!(validate_chronicle(&Chronicle::new("1.0")).is_valid());
+    }
+
+    #[test]
+    fn test_validate_empty_names_warn() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "  "));
+        chronicle.persons.push(Person::new("alice", ""));
+
+        let result = validate_chronicle(&chronicle);
+        let empty_names: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|i| i.issue_type == IssueType::EmptyName)
+            .collect();
+        assert_eq!(empty_names.len(), 2, "person name and category label");
+    }
+
+    #[test]
+    fn test_validate_implausible_date_warns() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        let mut person = Person::new("alice", "Alice");
+        person.facts.push(Fact::new(
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "2023-02-31",
+            "family",
+            "Impossible day",
+        ));
+        chronicle.persons.push(person);
+
+        let result = validate_chronicle(&chronicle);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].issue_type, IssueType::ImplausibleDate);
+
+        // Leap day, plain day, and incomplete dates stay clean
+        for ok in ["2024-02-29", "2023-02-28", "2023-02", "2023"] {
+            let mut c = Chronicle::new("1.0");
+            c.categories.push(Category::new("family", "Family"));
+            let mut p = Person::new("alice", "Alice");
+            p.facts.push(Fact::new(
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                ok,
+                "family",
+                "Fine",
+            ));
+            c.persons.push(p);
+            assert!(
+                validate_chronicle(&c).is_valid(),
+                "'{ok}' must validate clean"
+            );
+        }
     }
 
     #[test]

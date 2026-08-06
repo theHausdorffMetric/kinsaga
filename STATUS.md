@@ -140,6 +140,9 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Invalid MIME type | Warning | Attachment content_type not in type/subtype format |
 | Invalid attachment URL | Warning | Attachment URL doesn't parse (missing scheme etc.) |
 | Invalid ID pattern | Warning | Person/category ID doesn't match `^[a-z][a-z0-9_-]*$` |
+| Implausible date | Warning | Well-formed date whose day doesn't exist in that month (e.g. `2023-02-31`) |
+| Empty name/label | Warning | Person name or category label is empty (also rejected by `add-person`) |
+| Unknown version | Warning | Chronicle `version` is not `"1.0"` |
 
 ### Tests
 - 130 unit tests + 22 CLI integration tests + 1 doc test (all passing)
