@@ -517,52 +517,62 @@ pub fn apply_suggestions(chronicle: &mut Chronicle, suggestions: &[GpsSuggestion
     applied
 }
 
-/// ISO 3166-1 alpha-2 country codes mapped to common names (including native names).
-const COUNTRY_CODES: &[(&str, &[&str])] = &[
+/// Native-language and colloquial country-name aliases, keyed by ISO 3166-1
+/// alpha-2 code. The alpha-2/alpha-3 codes and official English names come
+/// from `rust_iso3166` (full 249-entry coverage); this overlay adds what
+/// Nominatim actually returns for local places ("Schweiz", "日本",
+/// "Україна") plus colloquialisms the ISO list doesn't know ("UK", "USA",
+/// "Holland", "Russia" — the official name is "Russian Federation").
+const NATIVE_ALIASES: &[(&str, &[&str])] = &[
     (
-        "ch",
+        "CH",
         &["switzerland", "schweiz", "suisse", "svizzera", "svizra"],
     ),
-    ("de", &["germany", "deutschland"]),
-    ("at", &["austria", "österreich", "oesterreich"]),
-    ("fr", &["france"]),
-    ("it", &["italy", "italia"]),
-    ("es", &["spain", "españa", "espana"]),
-    ("pt", &["portugal"]),
-    ("gb", &["united kingdom", "uk", "great britain", "england"]),
-    ("us", &["united states", "usa", "america"]),
-    ("ca", &["canada"]),
-    ("au", &["australia"]),
-    ("nz", &["new zealand"]),
-    ("jp", &["japan", "日本", "nippon", "nihon"]),
-    ("cn", &["china", "中国", "zhongguo"]),
-    ("kr", &["south korea", "korea", "대한민국", "한국"]),
-    ("in", &["india"]),
-    ("br", &["brazil", "brasil"]),
-    ("mx", &["mexico", "méxico"]),
-    ("ar", &["argentina"]),
-    ("nl", &["netherlands", "holland", "nederland"]),
-    ("be", &["belgium", "belgique", "belgië", "belgie"]),
-    ("pl", &["poland", "polska"]),
-    ("cz", &["czech republic", "czechia", "česko", "cesko"]),
-    ("se", &["sweden", "sverige"]),
-    ("no", &["norway", "norge"]),
-    ("dk", &["denmark", "danmark"]),
-    ("fi", &["finland", "suomi"]),
-    ("ru", &["russia", "россия", "rossiya"]),
-    ("gr", &["greece", "ελλάδα", "ellada"]),
-    ("tr", &["turkey", "türkiye", "turkiye"]),
-    ("ie", &["ireland", "éire", "eire"]),
-    ("za", &["south africa"]),
-    ("eg", &["egypt", "مصر"]),
-    ("il", &["israel", "ישראל"]),
-    ("ae", &["united arab emirates", "uae"]),
-    ("sg", &["singapore"]),
-    ("th", &["thailand", "ประเทศไทย"]),
-    ("vn", &["vietnam", "việt nam"]),
-    ("id", &["indonesia"]),
-    ("my", &["malaysia"]),
-    ("ph", &["philippines"]),
+    ("DE", &["germany", "deutschland"]),
+    ("AT", &["austria", "österreich", "oesterreich"]),
+    ("FR", &["france"]),
+    ("IT", &["italy", "italia"]),
+    ("ES", &["spain", "españa", "espana"]),
+    ("PT", &["portugal"]),
+    ("GB", &["united kingdom", "uk", "great britain", "england"]),
+    ("US", &["united states", "usa", "america"]),
+    ("CA", &["canada"]),
+    ("AU", &["australia"]),
+    ("NZ", &["new zealand"]),
+    ("JP", &["japan", "日本", "nippon", "nihon"]),
+    ("CN", &["china", "中国", "zhongguo"]),
+    ("KR", &["south korea", "korea", "대한민국", "한국"]),
+    ("IN", &["india"]),
+    ("BR", &["brazil", "brasil"]),
+    ("MX", &["mexico", "méxico"]),
+    ("AR", &["argentina"]),
+    ("NL", &["netherlands", "holland", "nederland"]),
+    ("BE", &["belgium", "belgique", "belgië", "belgie"]),
+    ("PL", &["poland", "polska"]),
+    ("CZ", &["czech republic", "czechia", "česko", "cesko"]),
+    ("SE", &["sweden", "sverige"]),
+    ("NO", &["norway", "norge"]),
+    ("DK", &["denmark", "danmark"]),
+    ("FI", &["finland", "suomi"]),
+    ("RU", &["russia", "россия", "rossiya"]),
+    ("GR", &["greece", "ελλάδα", "ellada"]),
+    ("TR", &["turkey", "türkiye", "turkiye"]),
+    ("IE", &["ireland", "éire", "eire"]),
+    ("ZA", &["south africa"]),
+    ("EG", &["egypt", "مصر"]),
+    ("IL", &["israel", "ישראל"]),
+    ("AE", &["united arab emirates", "uae"]),
+    ("SG", &["singapore"]),
+    ("TH", &["thailand", "ประเทศไทย"]),
+    ("VN", &["vietnam", "việt nam"]),
+    ("ID", &["indonesia"]),
+    ("MY", &["malaysia"]),
+    ("PH", &["philippines"]),
+    ("UA", &["ukraine", "україна", "ukraina"]),
+    ("HR", &["croatia", "hrvatska"]),
+    ("EE", &["estonia", "eesti"]),
+    ("HU", &["hungary", "magyarország", "magyarorszag"]),
+    ("RO", &["romania", "românia"]),
 ];
 
 /// Check if `needle` occurs in `haystack` on word boundaries, i.e. not as
@@ -594,48 +604,68 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
     false
 }
 
-/// Check if a string matches a country code or any of its names.
-fn matches_country_code(code: &str, name: &str) -> bool {
-    let code_lower = code.to_lowercase();
-    let name_lower = name.to_lowercase();
+/// Resolve a string that *is* a country designation — an alpha-2/alpha-3
+/// code, an alias, or an official ISO name, exactly — to its alpha-2 code.
+///
+/// Compound strings (a Nominatim display name like "Mettmenalp, Glarus,
+/// Schweiz") deliberately do not resolve here; see [`country_code_of`].
+fn country_code_exact(s: &str) -> Option<&'static str> {
+    let trimmed = s.trim();
+    if trimmed.len() == 2
+        && let Some(c) = rust_iso3166::from_alpha2(&trimmed.to_uppercase())
+    {
+        return Some(c.alpha2);
+    }
+    if trimmed.len() == 3
+        && let Some(c) = rust_iso3166::from_alpha3(&trimmed.to_uppercase())
+    {
+        return Some(c.alpha2);
+    }
 
-    for (iso_code, names) in COUNTRY_CODES {
-        if code_lower == *iso_code {
-            // Code matches, check if name matches any of the country names
-            for country_name in *names {
-                if contains_word(&name_lower, country_name)
-                    || contains_word(country_name, &name_lower)
-                {
-                    return true;
-                }
-            }
+    let lower = trimmed.to_lowercase();
+    for (code, names) in NATIVE_ALIASES {
+        if names.iter().any(|n| *n == lower) {
+            return Some(code);
         }
     }
-    false
+    rust_iso3166::ALL
+        .iter()
+        .find(|c| c.name.to_lowercase() == lower)
+        .map(|c| c.alpha2)
 }
 
-/// Check if two country names refer to the same country (via ISO code lookup).
-fn same_country(a: &str, b: &str) -> bool {
-    let a_lower = a.to_lowercase();
-    let b_lower = b.to_lowercase();
-
-    for (_iso_code, names) in COUNTRY_CODES {
-        let a_matches = names
-            .iter()
-            .any(|n| contains_word(&a_lower, n) || contains_word(n, &a_lower));
-        let b_matches = names
-            .iter()
-            .any(|n| contains_word(&b_lower, n) || contains_word(n, &b_lower));
-
-        if a_matches && b_matches {
-            return true;
+/// Resolve a country string to its ISO 3166-1 alpha-2 code, leniently.
+///
+/// Everything [`country_code_exact`] accepts, plus word-boundary
+/// containment in either direction: "United States" ⊂ "United States of
+/// America", "Bolivia" ⊂ "Bolivia (Plurinational State of)", "Schweiz"
+/// inside "Schweiz/Suisse/Svizzera/Svizra". Exact official-name matches
+/// win before containment, so "Sudan" can't land on "South Sudan".
+fn country_code_of(s: &str) -> Option<&'static str> {
+    if let Some(code) = country_code_exact(s) {
+        return Some(code);
+    }
+    let lower = s.trim().to_lowercase();
+    for c in rust_iso3166::ALL {
+        let official = c.name.to_lowercase();
+        if contains_word(&official, &lower) || contains_word(&lower, &official) {
+            return Some(c.alpha2);
         }
     }
-    false
+    for (code, names) in NATIVE_ALIASES {
+        if names
+            .iter()
+            .any(|n| contains_word(&lower, n) || contains_word(n, &lower))
+        {
+            return Some(code);
+        }
+    }
+    None
 }
 
 /// Check if two strings match (case-insensitive, with some normalization).
-/// Also handles ISO 3166-1 alpha-2 country codes and country name variants.
+/// Also handles ISO 3166-1 country codes and country name variants in any
+/// language covered by [`NATIVE_ALIASES`].
 pub fn fuzzy_match(a: &str, b: &str) -> bool {
     let normalize = |s: &str| s.to_lowercase().replace(['-', '_'], " ").trim().to_string();
 
@@ -647,14 +677,20 @@ pub fn fuzzy_match(a: &str, b: &str) -> bool {
         return true;
     }
 
-    // ISO country code and country-name matching come before the containment
-    // shortcut so short codes never substring-match unrelated names.
-    if matches_country_code(a, b) || matches_country_code(b, a) {
-        return true;
+    // Both sides are unambiguous country designations: the codes decide —
+    // equal is a match, different is a definitive non-match ("Sudan" vs
+    // "South Sudan" must not fall through to substring containment).
+    if let (Some(ca), Some(cb)) = (country_code_exact(a), country_code_exact(b)) {
+        return ca == cb;
     }
 
-    // Check if both are names for the same country (e.g., "Japan" and "日本")
-    if same_country(a, b) {
+    // Lenient country resolution for compound strings (display names):
+    // both sides resolving to the same alpha-2 code is a match. Runs
+    // before the containment shortcut so short codes never
+    // substring-match unrelated names ("CH" in "China").
+    if let (Some(ca), Some(cb)) = (country_code_of(a), country_code_of(b))
+        && ca == cb
+    {
         return true;
     }
 
@@ -722,6 +758,27 @@ mod tests {
         assert!(fuzzy_match("Japan", "日本"));
         assert!(fuzzy_match("Deutschland", "Germany"));
         assert!(fuzzy_match("Schweiz", "Switzerland"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_full_iso_coverage() {
+        // Countries beyond the alias overlay resolve via rust_iso3166 —
+        // these all reported false mismatches before
+        assert!(fuzzy_match("UA", "Ukraine"));
+        assert!(fuzzy_match("Ukraine", "Україна"));
+        assert!(fuzzy_match("HR", "Croatia"));
+        assert!(fuzzy_match("Hrvatska", "Croatia"));
+        assert!(fuzzy_match("EE", "Estonia"));
+        assert!(fuzzy_match("Eesti", "Estonia"));
+        // Official long forms match their common short forms
+        assert!(fuzzy_match("US", "United States of America"));
+        assert!(fuzzy_match("Bolivia", "Bolivia (Plurinational State of)"));
+        // Alpha-3 codes resolve too
+        assert!(fuzzy_match("UKR", "Ukraine"));
+        // No new false positives
+        assert!(!fuzzy_match("UA", "United Arab Emirates"));
+        assert!(!fuzzy_match("Niger", "Nigeria"));
+        assert!(!fuzzy_match("Sudan", "South Sudan"));
     }
 
     #[test]

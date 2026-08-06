@@ -86,6 +86,11 @@ fn category_ids(chronicle: &Chronicle) -> Vec<String> {
 ///
 /// If `options.propagate` is true, the fact will also be added to all persons
 /// listed in `options.with`, with appropriate cross-references.
+///
+/// Attachment *URL* validity is the caller's contract: build attachments via
+/// [`build_attachments`] to get format checking; URLs stored without it are
+/// reported by `validate_chronicle` as warnings (MIME types are checked
+/// here either way).
 pub fn add_fact(
     chronicle: &mut Chronicle,
     person_id: &str,
@@ -489,6 +494,10 @@ pub fn remove_fact(
 ///
 /// Finds the fact across all persons and applies the specified updates.
 /// Only fields with Some values are modified.
+///
+/// As with [`add_fact`], attachment URL validity in
+/// [`AttachmentUpdate::Add`] is the caller's contract — use
+/// [`build_attachments`] for format checking.
 pub fn edit_fact(
     chronicle: &mut Chronicle,
     fact_id: &str,

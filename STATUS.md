@@ -1,6 +1,6 @@
 # Kinsaga - Project Status
 
-**Last Updated:** 2026-07-14 (all CODE_REVIEW.md phases complete; v0.4.0)
+**Last Updated:** 2026-08-06 (CODE_REVIEW-2026-08.md plan steps 1–4 complete; v0.5.0)
 
 ## Overview
 
@@ -123,6 +123,10 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
   (corrections applied via `--correct` count as resolved). With `--strict`,
   warnings also cause a non-zero exit. This makes
   `kinsaga validate --strict && …` usable in scripts and CI.
+- **GPS outcomes are informational by default:** `--gps` mismatches and
+  lookup failures are reported on stderr but do not affect the exit code —
+  network-dependent checks shouldn't gate scripts unasked. Combining
+  `--strict --gps` opts in: mismatches then fail the run too.
 
 #### Validation Checks
 | Check | Level | Description |
@@ -146,7 +150,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Diverged shared fact | Warning | Propagated copies (reciprocal `with`, same date) differ in text/category — one side was edited |
 
 ### Tests
-- 130 unit tests + 22 CLI integration tests + 1 doc test (all passing)
+- 141 unit tests + 23 CLI integration tests + 1 doc test (all passing)
 - Test coverage across all library modules; integration tests cover exit
   codes, stream separation, and mutation roundtrips (`tests/cli.rs`)
 - Test data uses fictional names (Alice Smith, Bob Johnson, Springfield, Shelbyville)
@@ -184,7 +188,7 @@ kinsaga/
 
 ## Configuration
 
-- **Edition:** Rust 2024 (MSRV 1.88)
+- **Edition:** Rust 2024 (MSRV 1.97 — tracks latest stable)
 - **CI:** builds.sr.ht via `.build.yml` (fmt, clippy `-D warnings`, tests)
 - **License:** GPL-3.0-or-later
 - **Author:** Daniel Probst <daniel@probst.dev>
@@ -208,6 +212,7 @@ regex = "1.13"
 tempfile = "3.27"
 ureq = "3.3"
 urlencoding = "2.1"
+rust_iso3166 = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -289,7 +294,10 @@ GPS validation via Nominatim (OpenStreetMap) is now implemented.
 - Reverse geocoding: Validate existing GPS coordinates against stored country/place
 - Forward geocoding: Suggest coordinates for locations without GPS
 - Apply suggestions: Automatically add top-ranked coordinates to chronicle
-- ISO country code matching: CH↔Switzerland/Schweiz, JP↔Japan/日本, etc.
+- ISO country code matching for all 249 ISO 3166-1 countries (alpha-2,
+  alpha-3, official names via `rust_iso3166`) plus a curated
+  native-language alias overlay: CH↔Switzerland/Schweiz, JP↔Japan/日本,
+  UA↔Ukraine/Україна, etc.
 - Rate limiting: 1 request/second per Nominatim ToS
 
 **Implementation:**

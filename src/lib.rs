@@ -71,6 +71,3 @@ pub use validate::{
     IssueType, ValidationIssue, ValidationResult, correct_uuids, is_valid_id, is_valid_mime_type,
     validate_chronicle,
 };
-
-// Re-export url::Url for convenience
-pub use url::Url;

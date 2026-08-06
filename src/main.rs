@@ -101,7 +101,9 @@ enum Commands {
         #[arg(long)]
         in_place: bool,
 
-        /// Validate GPS coordinates against Nominatim (reverse geocoding)
+        /// Validate GPS coordinates against Nominatim (reverse geocoding).
+        /// Outcomes are informational and reported on stderr; combined
+        /// with --strict, mismatches also fail the run
         #[arg(long)]
         gps: bool,
 
@@ -1002,6 +1004,9 @@ fn cmd_validate(
     // Tracks whether the in-memory chronicle diverged from the file
     let mut modified = false;
 
+    // GPS mismatches found under --gps; informational unless --strict
+    let mut gps_mismatches = 0;
+
     // Handle --correct flag: corrections are applied to the working copy;
     // emitting or saving happens exactly once at the end, so combining
     // --correct with --gps --apply can never lose changes
@@ -1093,6 +1098,7 @@ fn cmd_validate(
                 .iter()
                 .filter(|o| matches!(o, GpsCheckOutcome::Checked(r) if r.is_mismatch()))
                 .count();
+            gps_mismatches = mismatches;
             let errors = outcomes
                 .iter()
                 .filter(|o| matches!(o, GpsCheckOutcome::Failed { .. }))
@@ -1274,10 +1280,11 @@ fn cmd_validate(
             final_result.errors.len()
         );
     }
-    if strict && !final_result.warnings.is_empty() {
+    if strict && (!final_result.warnings.is_empty() || gps_mismatches > 0) {
         anyhow::bail!(
-            "validation failed (--strict): {} warning(s) found",
-            final_result.warnings.len()
+            "validation failed (--strict): {} warning(s), {} GPS mismatch(es) found",
+            final_result.warnings.len(),
+            gps_mismatches
         );
     }
 

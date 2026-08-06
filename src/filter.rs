@@ -149,14 +149,18 @@ pub fn filter_facts<'a>(person: &'a Person, filter: &FactFilter) -> Vec<&'a Fact
 }
 
 /// Search for facts across all persons in the chronicle.
+///
+/// Results are grouped by person (chronicle document order) and sorted
+/// chronologically within each person; facts with unparseable dates sort
+/// last within their group.
 pub fn search<'a>(chronicle: &'a Chronicle, filter: &FactFilter) -> Vec<SearchResult<'a>> {
     let mut results = Vec::new();
 
     for person in &chronicle.persons {
-        for fact in &person.facts {
-            if filter.matches(fact) {
-                results.push(SearchResult { person, fact });
-            }
+        let mut matches: Vec<&Fact> = person.facts.iter().filter(|f| filter.matches(f)).collect();
+        matches.sort_by(|a, b| cmp_date_strings(&a.date, &b.date));
+        for fact in matches {
+            results.push(SearchResult { person, fact });
         }
     }
 
@@ -272,6 +276,25 @@ mod tests {
 
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].text, "Graduated university");
+    }
+
+    #[test]
+    fn test_search_results_sorted_within_person() {
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        let mut alice = Person::new("alice", "Alice");
+        alice.facts.push(Fact::new("1", "2015", "family", "Later"));
+        alice
+            .facts
+            .push(Fact::new("2", "1990", "family", "Earlier"));
+        alice
+            .facts
+            .push(Fact::new("3", "someday", "family", "Undated"));
+        chronicle.persons.push(alice);
+
+        let results = search(&chronicle, &FactFilter::new());
+        let texts: Vec<&str> = results.iter().map(|r| r.fact.text.as_str()).collect();
+        assert_eq!(texts, ["Earlier", "Later", "Undated"]);
     }
 
     #[test]

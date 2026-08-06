@@ -309,6 +309,36 @@ fn edit_fact_add_attachment_with_type_and_title() {
 }
 
 #[test]
+fn timeline_text_and_json_output() {
+    // Text format: person header, year grouping, fact text on stdout
+    kinsaga()
+        .args(["-i", SAMPLE, "timeline", "alice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Alice"))
+        .stdout(predicate::str::contains("1990"))
+        .stdout(predicate::str::contains("Born in Springfield"));
+
+    // JSON format: a parseable array with one object per fact
+    let output = kinsaga()
+        .args(["-i", SAMPLE, "timeline", "alice", "-f", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let facts: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let arr = facts.as_array().expect("timeline JSON must be an array");
+    assert_eq!(arr.len(), 9, "alice has 9 facts in the sample");
+    assert!(arr[0].get("date").is_some());
+
+    // Unknown person is an error
+    kinsaga()
+        .args(["-i", SAMPLE, "timeline", "nobody"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
 fn search_invalid_regex_reports_error() {
     kinsaga()
         .args(["-i", SAMPLE, "search", "[invalid", "--regex"])
