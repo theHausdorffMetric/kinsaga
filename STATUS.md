@@ -204,10 +204,11 @@ mentioned in the skill, and the frontmatter `documents-version` must
 match the crate version — bump it when cutting a release. Both the skill
 and its test are excluded from the published package.
 
-**Install** by symlinking the directory (stays in sync with the repo):
+**Install** by copying (re-copy after changing the skill — the installed
+copy doesn't track the repo):
 
 ```bash
-mkdir -p ~/.claude/skills && ln -sn ~/dev/kinsaga/claude_skill ~/.claude/skills/kinsaga
+mkdir -p ~/.claude/skills/kinsaga && cp ~/dev/kinsaga/claude_skill/SKILL.md ~/.claude/skills/kinsaga/
 ```
 
 ## Configuration
