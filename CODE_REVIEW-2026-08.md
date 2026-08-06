@@ -13,6 +13,22 @@ stream contracts each carry regression tests that pass.
 
 ---
 
+> **Execution log (2026-08-06):** plan steps 1–4 plus the two cheap step-5
+> items executed the same day; every step committed and pushed
+> individually with gates green. One deliberate deviation from §5 step 3:
+> the drift detector as planned (flag text divergence between reciprocal
+> copies) false-positived on the sample chronicle's *perspective-phrased*
+> pair ("Married Bob" / "Married Alice") — legitimate hand-authored data.
+> Text divergence is indistinguishable from perspective phrasing without a
+> schema-level group id — and the sample's "Trip to Japan" pair showed
+> attachments are per-copy by design (alice's photos live on her side
+> only). The shipped detector therefore compares category and location on
+> text-matched pairs (an event happened once, in one place) and flags
+> text-mismatched pairs only on category disagreement; text wording and
+> attachments stay free per side. Full text-drift detection moves to the
+> group-id item (A1 option 3). Deferred as planned: `main.rs` render split
+> (opens the B2 TUI phase) and the `Fact.group` schema change.
+
 ## 1. Summary
 
 Kinsaga at v0.4.0 is in **good shape**. The prior review cycle visibly worked:

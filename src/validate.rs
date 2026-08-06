@@ -335,9 +335,15 @@ pub fn validate_chronicle(chronicle: &Chronicle) -> ValidationResult {
 /// only by reciprocal `with` references (a documented design decision) —
 /// nothing keeps the copies in sync afterwards. For every unordered person
 /// pair and date carrying reciprocal references, the copies on both sides
-/// are matched by `(category, text)`; a fact left unmatched on *both* sides
-/// looks like a propagation pair where one copy was edited, and warns.
-/// Distinct shared events on the same date pair up cleanly and stay silent.
+/// are paired by text; a pair whose category or location differ warns (the
+/// event happened once, in one place — a difference means one side was
+/// edited). Deliberately *not* compared: attachments (each side keeps its
+/// own photos — the sample chronicle models exactly that) and text —
+/// hand-authored shared facts legitimately phrase each side from its own
+/// perspective ("Married Bob" / "Married Alice"), indistinguishable from a
+/// text edit without a schema-level group id. A text-mismatched leftover
+/// pair differing in *category* still warns, since perspective phrasing
+/// keeps the category.
 fn detect_shared_fact_drift(chronicle: &Chronicle, result: &mut ValidationResult) {
     use crate::format::truncate_text;
     use crate::model::Fact;
@@ -376,35 +382,63 @@ fn detect_shared_fact_drift(chronicle: &Chronicle, result: &mut ValidationResult
                     continue;
                 }
 
-                // Greedy exact matching; what remains unmatched on both
-                // sides pairs up as drift candidates
+                // Pair by identical text first; a text-matched pair whose
+                // other fields differ is drift (propagation created them
+                // identical)
                 let mut unmatched_a: Vec<&Fact> = Vec::new();
                 for fa in side_a {
-                    match side_b
-                        .iter()
-                        .position(|fb| fb.category == fa.category && fb.text == fa.text)
-                    {
+                    match side_b.iter().position(|fb| fb.text == fa.text) {
                         Some(pos) => {
-                            side_b.remove(pos);
+                            let fb = side_b.remove(pos);
+                            let mut differs = Vec::new();
+                            if fb.category != fa.category {
+                                differs.push("category");
+                            }
+                            if fb.location != fa.location {
+                                differs.push("location");
+                            }
+                            if !differs.is_empty() {
+                                result.warnings.push(ValidationIssue {
+                                    person_id: pa.id.clone(),
+                                    fact_id: Some(fa.id.clone()),
+                                    message: format!(
+                                        "Shared fact '{}' ({}) on {} differs from its copy on '{}' ({}) in {}",
+                                        truncate_text(&fa.text, 30),
+                                        fa.id,
+                                        fa.date,
+                                        pb.id,
+                                        fb.id,
+                                        differs.join(", ")
+                                    ),
+                                    issue_type: IssueType::DivergedSharedFact,
+                                });
+                            }
                         }
                         None => unmatched_a.push(fa),
                     }
                 }
+                // Leftovers with different texts are (probably) perspective
+                // phrasing and stay silent — unless the categories disagree,
+                // which perspective phrasing wouldn't change
                 for (fa, fb) in unmatched_a.iter().zip(side_b.iter()) {
-                    result.warnings.push(ValidationIssue {
-                        person_id: pa.id.clone(),
-                        fact_id: Some(fa.id.clone()),
-                        message: format!(
-                            "Shared fact '{}' ({}) on {} diverged from its copy on '{}' ('{}', {})",
-                            truncate_text(&fa.text, 30),
-                            fa.id,
-                            fa.date,
-                            pb.id,
-                            truncate_text(&fb.text, 30),
-                            fb.id
-                        ),
-                        issue_type: IssueType::DivergedSharedFact,
-                    });
+                    if fa.category != fb.category {
+                        result.warnings.push(ValidationIssue {
+                            person_id: pa.id.clone(),
+                            fact_id: Some(fa.id.clone()),
+                            message: format!(
+                                "Shared facts '{}' ({}) and '{}' ('{}', {}) on {} differ in category ('{}' vs '{}')",
+                                truncate_text(&fa.text, 30),
+                                fa.id,
+                                truncate_text(&fb.text, 30),
+                                pb.id,
+                                fb.id,
+                                fa.date,
+                                fa.category,
+                                fb.category
+                            ),
+                            issue_type: IssueType::DivergedSharedFact,
+                        });
+                    }
                 }
             }
         }
@@ -716,13 +750,15 @@ mod tests {
         // Healthy propagation validates clean
         assert!(validate_chronicle(&chronicle).is_valid());
 
-        // Edit one copy only → the pair is flagged
+        // Edit one copy's location only → the pair is flagged as drift
         let alice_fact_id = added.facts_added[0].2.clone();
         edit_fact(
             &mut chronicle,
             &alice_fact_id,
             EditFactOptions {
-                text: Some("Picnic at the lake".to_string()),
+                location: Some(crate::facts::LocationUpdate::Set(crate::Location::new(
+                    "France",
+                ))),
                 ..Default::default()
             },
         )
@@ -735,8 +771,60 @@ mod tests {
             .filter(|i| i.issue_type == IssueType::DivergedSharedFact)
             .collect();
         assert_eq!(drift.len(), 1, "exactly one drift pair");
-        assert!(drift[0].message.contains("Picnic at the lake"));
+        assert!(drift[0].message.contains("location"));
         assert!(drift[0].message.contains("bob"));
+    }
+
+    #[test]
+    fn test_validate_perspective_phrased_shared_facts_stay_clean() {
+        // Hand-authored shared facts legitimately word each side from its
+        // own perspective; different text alone must not warn
+        let mut chronicle = Chronicle::new("1.0");
+        chronicle.categories.push(Category::new("family", "Family"));
+        let mut alice = Person::new("alice", "Alice");
+        alice.facts.push(
+            Fact::new(
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "2015",
+                "family",
+                "Married Bob",
+            )
+            .with_persons(vec!["bob".to_string()]),
+        );
+        chronicle.persons.push(alice);
+        let mut bob = Person::new("bob", "Bob");
+        bob.facts.push(
+            Fact::new(
+                "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "2015",
+                "family",
+                "Married Alice",
+            )
+            .with_persons(vec!["alice".to_string()]),
+        );
+        chronicle.persons.push(bob);
+
+        assert!(validate_chronicle(&chronicle).is_valid());
+
+        // Per-side attachments on a text-matched pair are fine too (each
+        // side keeps its own photos, as in the sample chronicle)
+        chronicle.persons[0].facts[0].text = "Married".to_string();
+        chronicle.persons[1].facts[0].text = "Married".to_string();
+        chronicle.persons[0].facts[0]
+            .attachments
+            .push(crate::Attachment::new("file:///photos/wedding.jpg"));
+        assert!(validate_chronicle(&chronicle).is_valid());
+
+        // ...but a category disagreement on a perspective-phrased pair
+        // still warns: perspective phrasing wouldn't change the category
+        chronicle.persons[0].facts[0].text = "Married Bob".to_string();
+        chronicle.persons[1].facts[0].text = "Married Alice".to_string();
+        chronicle.categories.push(Category::new("travel", "Travel"));
+        chronicle.persons[1].facts[0].category = "travel".to_string();
+        let result = validate_chronicle(&chronicle);
+        assert!(result.warnings.iter().any(
+            |i| i.issue_type == IssueType::DivergedSharedFact && i.message.contains("category")
+        ));
     }
 
     #[test]

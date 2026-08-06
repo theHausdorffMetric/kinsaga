@@ -147,7 +147,7 @@ The library is designed for reuse by different UI implementations (CLI, web, GUI
 | Implausible date | Warning | Well-formed date whose day doesn't exist in that month (e.g. `2023-02-31`) |
 | Empty name/label | Warning | Person name or category label is empty (also rejected by `add-person`) |
 | Unknown version | Warning | Chronicle `version` is not `"1.0"` |
-| Diverged shared fact | Warning | Propagated copies (reciprocal `with`, same date) differ in text/category — one side was edited |
+| Diverged shared fact | Warning | Propagated copies (reciprocal `with`, same date, same text) differ in category or location — one side was edited. Not compared: attachments (each side keeps its own photos) and text wording (perspective-phrased pairs like "Married Bob"/"Married Alice" are legitimate; only a category disagreement flags those) |
 
 ### Tests
 - 141 unit tests + 23 CLI integration tests + 1 doc test (all passing)
@@ -424,7 +424,7 @@ echo "KINSAGA_INPUT=examples/sample-chronicle.json" > .env
 |-------|----------|
 | Date format | ISO 8601 + `?` suffix for uncertainty |
 | Fact IDs | UUID |
-| Shared facts | Duplicate per person + optional `with` field. The copies are unlinked after creation: `edit-fact`/`remove-fact` touch one copy only, so `validate` detects diverged copies (drift warning). An explicit shared-group ID is the eventual schema-level link, to ride along with the next schema version bump |
+| Shared facts | Duplicate per person + optional `with` field. The copies are unlinked after creation: `edit-fact`/`remove-fact` touch one copy only, so `validate` detects diverged copies (drift warning on category/location differences; text wording and attachments are free per side — perspective phrasing and per-person photos are legitimate). An explicit shared-group ID is the eventual schema-level link, to ride along with the next schema version bump |
 | Validation | Rust structs (no separate JSON Schema file) |
 | Categories | User-defined in JSON |
 | Storage | Local JSON file |
