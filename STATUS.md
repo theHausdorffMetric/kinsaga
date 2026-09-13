@@ -165,7 +165,6 @@ kinsaga/
 ├── Cargo.toml              # Single crate with lib + bin
 ├── STATUS.md               # This file
 ├── CODE_REVIEW.md          # 2026-07 review findings + implementation log
-├── .build.yml              # builds.sr.ht CI (fmt, clippy, tests)
 ├── schema.json             # JSON Schema for chronicle files (embedded in CLI)
 ├── claude_skill/
 │   └── SKILL.md            # Claude Code skill for the CLI (see below)
@@ -213,11 +212,11 @@ mkdir -p ~/.claude/skills/kinsaga && cp ~/dev/kinsaga/claude_skill/SKILL.md ~/.c
 
 ## Configuration
 
-- **Edition:** Rust 2024 (MSRV 1.97 — tracks latest stable)
-- **CI:** builds.sr.ht via `.build.yml` (fmt, clippy `-D warnings`, tests)
+- **Edition:** Rust 2024 (MSRV 1.98 — tracks latest stable)
+- **CI:** none hosted (builds.sr.ht retired 2026-09-13 with the move to GitHub); local gate before pushing: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo audit`
 - **License:** GPL-3.0-or-later
 - **Author:** Daniel Probst <daniel@probst.dev>
-- **Repository:** https://git.sr.ht/~danprobst/kinsaga
+- **Repository:** https://github.com/theHausdorffMetric/kinsaga
 
 ## Dependencies
 

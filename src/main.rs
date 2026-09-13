@@ -1034,7 +1034,7 @@ fn cmd_validate(
         let mut client = NominatimClient::new(concat!(
             "kinsaga/",
             env!("CARGO_PKG_VERSION"),
-            " (https://git.sr.ht/~danprobst/kinsaga)"
+            " (https://github.com/theHausdorffMetric/kinsaga)"
         ));
 
         let with_coords = count_facts_with_coordinates(&chronicle);

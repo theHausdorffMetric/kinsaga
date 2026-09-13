@@ -2,22 +2,15 @@
 name = "kinsaga"
 version = "0.5.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.98"
 authors = ["Daniel Probst <daniel@probst.dev>"]
 description = "A family chronicle library and CLI for managing timestamped, categorized life events"
 license = "GPL-3.0-or-later"
-repository = "https://git.sr.ht/~danprobst/kinsaga"
+repository = "https://github.com/theHausdorffMetric/kinsaga"
 keywords = ["family", "chronicle", "genealogy", "timeline", "history"]
 categories = ["command-line-utilities", "data-structures"]
 readme = "README.md"
-exclude = [
-    "STATUS.md",
-    "CODE_REVIEW.md",
-    "CODE_REVIEW-2026-08.md",
-    ".build.yml",
-    "claude_skill/",
-    "tests/skill_doc_sync.rs",
-]
+include = ["src/**", "tests/*.rs", "!tests/skill_doc_sync.rs", "/examples/sample-chronicle.json", "/schema.json", "/README.md", "/LICENSE"]
 
 [[bin]]
 name = "kinsaga"
